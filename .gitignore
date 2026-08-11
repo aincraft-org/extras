@@ -1,0 +1,27 @@
+# Gradle and build outputs
+.gradle/
+build/
+
+# Local Paper server runtime
+run/
+
+# Local credentials and environment files
+gradle.properties
+local.properties
+.env
+.env.*
+
+# CI and local logs
+deployment.log
+*.log
+
+# IDE metadata
+.idea/
+*.iml
+.vscode/
+
+# Agent/session state
+.superpowers/
+
+# OS metadata
+.DS_Store
