@@ -27,9 +27,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run tests and structural publication checks
+      - name: Run quality checks, tests, and structural publication checks
         run: >-
-          ./gradlew clean test build
+          ./gradlew clean check build
           generatePomFileForExtrasApiPublication
           generatePomFileForExtrasPaperPublication
           nmcpCheckAllPublicationsFiles

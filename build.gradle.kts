@@ -2,8 +2,12 @@ plugins {
     java
     `maven-publish`
     signing
+    checkstyle
+    pmd
     alias(libs.plugins.shadow)
     alias(libs.plugins.run.paper)
+    alias(libs.plugins.spotbugs)
+    alias(libs.plugins.spotless)
 }
 
 group = "dev.mintychochip"
@@ -28,6 +32,30 @@ java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
     }
+}
+
+checkstyle {
+    toolVersion = "10.26.1"
+    configFile = rootProject.file("config/checkstyle/checkstyle.xml")
+}
+
+pmd {
+    toolVersion = "7.16.0"
+    ruleSetFiles = files(rootProject.file("config/pmd/pmd.xml"))
+    isConsoleOutput = true
+    isIgnoreFailures = false
+}
+
+spotless {
+    java {
+        googleJavaFormat("1.28.0")
+        targetExclude("build/**")
+    }
+}
+spotbugs {
+    effort.set(com.github.spotbugs.snom.Effort.MAX)
+    reportLevel.set(com.github.spotbugs.snom.Confidence.HIGH)
+    ignoreFailures.set(false)
 }
 
 val apiJar = tasks.register<org.gradle.api.tasks.bundling.Jar>("apiJar") {
@@ -180,6 +208,10 @@ tasks.shadowJar {
     archiveBaseName.set("extras-paper")
     archiveClassifier.set("")
     mustRunAfter(tasks.jar)
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("spotlessCheck"))
 }
 
 tasks.withType<org.gradle.api.publish.maven.tasks.PublishToMavenRepository>().configureEach {
