@@ -67,7 +67,7 @@ jobs:
       - name: Calculate UTC release version
         id: version
         shell: bash
-        run: echo "version=$(date -u +'%Y.%m.%d').${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(date -u +'%y.%-m.%-d').${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Run signed publication gate
         env:
