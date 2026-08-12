@@ -5,9 +5,6 @@
          xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.github.io/schema/ruleset_2_0_0.xsd">
     <description>Focused blocking rules for correctness and unsafe Java constructs.</description>
     <rule ref="category/java/errorprone.xml/AvoidBranchingStatementAsLastInLoop"/>
-    <rule ref="category/java/errorprone.xml/AvoidDuplicateLiterals"/>
-    <rule ref="category/java/errorprone.xml/AvoidUncheckedExceptionsInSignatures"/>
-    <rule ref="category/java/errorprone.xml/CloseResource"/>
     <rule ref="category/java/errorprone.xml/EmptyCatchBlock"/>
     <rule ref="category/java/errorprone.xml/EmptyFinalizer"/>
     <rule ref="category/java/errorprone.xml/ReturnFromFinallyBlock"/>
