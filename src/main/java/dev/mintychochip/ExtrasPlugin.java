@@ -8,6 +8,7 @@ import dev.mintychochip.core.DefaultFriendService;
 import dev.mintychochip.core.DefaultMailService;
 import dev.mintychochip.core.DefaultPartyService;
 import dev.mintychochip.core.DefaultTitleService;
+import dev.mintychochip.core.DefaultTradeService;
 import dev.mintychochip.core.JsonTitleRepository;
 import dev.mintychochip.core.SqliteFriendRepository;
 import dev.mintychochip.core.SqliteMailRepository;
@@ -20,6 +21,8 @@ import dev.mintychochip.paper.MailboxGui;
 import dev.mintychochip.paper.PartyCommand;
 import dev.mintychochip.paper.PartyLifecycleListener;
 import dev.mintychochip.paper.TitleCommand;
+import dev.mintychochip.paper.TradeCommand;
+import dev.mintychochip.paper.TradeGui;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.nio.file.Path;
 import java.util.List;
@@ -31,11 +34,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 /**
  * Extras entrypoint.
  *
- * <p>Constructs the Bukkit-free party, friend, title, and mailbox services over SQLite/JSON files,
- * registers them as the {@link PartyService}, {@link FriendService}, {@link TitleService}, and
- * {@link MailService} SPIs on the Bukkit {@code ServicesManager} (so other plugins can consume
- * them), registers the {@code /party}, {@code /friend}, {@code /title}, and {@code /mail} commands,
- * and announces member/friend join/quit presence.
+ * <p>Constructs the Bukkit-free party, friend, title, mailbox, and transient trade services,
+ * registers the persistent services on the Bukkit {@code ServicesManager}, registers the {@code
+ * /party}, {@code /friend}, {@code /title}, {@code /mail}, and {@code /trade} commands, and
+ * announces member/friend join/quit presence.
  */
 public final class ExtrasPlugin extends JavaPlugin {
 
@@ -44,10 +46,12 @@ public final class ExtrasPlugin extends JavaPlugin {
   private DefaultFriendService friendService;
   private FriendLifecycleListener friendLifecycleListener;
   private DefaultTitleService titleService;
+  private DefaultTradeService tradeService;
   private SqliteMailRepository mailRepository;
   private MailService mailService;
   private org.bukkit.event.Listener mailboxGuiListener;
   private org.bukkit.event.Listener composeListener;
+  private org.bukkit.event.Listener tradeGuiListener;
 
   @Override
   public void onEnable() {
@@ -93,6 +97,10 @@ public final class ExtrasPlugin extends JavaPlugin {
     composeListener = ComposeGui.listener();
     Bukkit.getPluginManager().registerEvents(composeListener, this);
 
+    tradeService = new DefaultTradeService();
+    tradeGuiListener = TradeGui.listener(tradeService);
+    Bukkit.getPluginManager().registerEvents(tradeGuiListener, this);
+
     getLifecycleManager()
         .registerEventHandler(
             LifecycleEvents.COMMANDS,
@@ -125,8 +133,14 @@ public final class ExtrasPlugin extends JavaPlugin {
                       "Player mailbox — send, read, and claim mail.",
                       List.of(),
                       new MailCommand(mailService));
+              event
+                  .registrar()
+                  .register(
+                      "trade",
+                      "Trade items with another online player.",
+                      List.of(),
+                      new TradeCommand(tradeService));
             });
-
     getLogger()
         .info(
             "Extras enabled (SQLite stores at "
@@ -142,8 +156,13 @@ public final class ExtrasPlugin extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    TradeGui.closeActiveSessions();
     ComposeGui.closeActiveSessions();
     MailboxGui.clearViews();
+    if (tradeGuiListener != null) {
+      HandlerList.unregisterAll(tradeGuiListener);
+      tradeGuiListener = null;
+    }
     if (mailboxGuiListener != null) {
       HandlerList.unregisterAll(mailboxGuiListener);
       mailboxGuiListener = null;
@@ -172,10 +191,11 @@ public final class ExtrasPlugin extends JavaPlugin {
       mailRepository.close();
       mailRepository = null;
     }
-    titleService = null; // file-backed store; no close needed
+    titleService = null;
+    tradeService = null;
     mailService = null;
     Bukkit.getServicesManager().unregister(this);
-    getLogger().info("Extras disabled; party, friend, and mailbox stores closed.");
+    getLogger().info("Extras disabled; party, friend, mailbox, and trade stores closed.");
   }
 
   /** Returns the live party service, or {@code null} if disabled. */

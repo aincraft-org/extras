@@ -3,7 +3,7 @@ version: '${version}'
 main: dev.mintychochip.ExtrasPlugin
 api-version: '1.21'
 folia-supported: true
-description: Persistent parties, friendships, titles, and player mailboxes.
+description: Persistent parties, friendships, titles, player mailboxes, and item trading.
 author: jlo
 website: https://github.com/aincraft-org/modular-extras
 permissions:
