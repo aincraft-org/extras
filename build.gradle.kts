@@ -1,7 +1,6 @@
 plugins {
     java
     `maven-publish`
-    signing
     checkstyle
     pmd
     alias(libs.plugins.shadow)
@@ -14,17 +13,6 @@ group = "dev.mintychochip"
 val requestedReleaseVersion = providers.gradleProperty("releaseVersion")
 val releaseVersion = requestedReleaseVersion.orElse("0.0.0-local")
 version = releaseVersion.get()
-
-gradle.taskGraph.whenReady {
-    val publicationRequested = gradle.startParameter.taskNames.any { taskName ->
-        taskName.substringAfterLast(':').startsWith("publish")
-    }
-    if (publicationRequested && requestedReleaseVersion.orNull.isNullOrBlank()) {
-        throw GradleException(
-            "Publishing requires an explicit -PreleaseVersion to avoid reusing an immutable Central version.",
-        )
-    }
-}
 
 val mainSourceSet = sourceSets.getByName("main")
 
@@ -135,8 +123,18 @@ fun org.gradle.api.publish.maven.MavenPom.configureExtrasPom(
         url.set("https://github.com/aincraft-org/modular-extras")
     }
 }
-
 publishing {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/aincraft-org/extras")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
+
     publications {
         create<org.gradle.api.publish.maven.MavenPublication>("extrasApi") {
             artifactId = "extras-api"
@@ -161,22 +159,11 @@ publishing {
             pom {
                 configureExtrasPom(
                     displayName = "Extras Paper",
-                    artifactDescription = "Standalone Paper plugin for parties, friendships, titles, and player mailboxes.",
+                    artifactDescription = "Standalone Paper plugin for parties, friendships, titles, and mailboxes.",
                 )
             }
         }
     }
-}
-
-signing {
-    val signingKey = providers.gradleProperty("signingKey")
-        .orElse(providers.environmentVariable("SIGNING_KEY"))
-    val signingPassword = providers.gradleProperty("signingPassword")
-        .orElse(providers.environmentVariable("SIGNING_PASSWORD"))
-    useInMemoryPgpKeys(signingKey.orNull, signingPassword.orNull)
-    isRequired = !providers.gradleProperty("skipSigning").isPresent
-    sign(publishing.publications["extrasApi"])
-    sign(publishing.publications["extrasPaper"])
 }
 
 repositories {

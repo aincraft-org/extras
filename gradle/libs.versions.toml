@@ -1,5 +1,4 @@
-# The NMCP settings plugin remains versioned in settings.gradle.kts because Gradle
-# does not allow version-catalog plugin aliases in settings files.
+# The GitHub Packages publication repository is configured in build.gradle.kts.
 
 [versions]
 paper-api = "1.21.11-R0.1-SNAPSHOT"

@@ -1,0 +1,71 @@
+name: CI and GitHub Packages
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GITHUB_ACTOR: ${{ github.actor }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run quality checks, tests, build, and publication checks
+        run: >-
+          ./gradlew clean check build
+          generatePomFileForExtrasApiPublication
+          generatePomFileForExtrasPaperPublication
+
+  publish:
+    name: Publish to GitHub Packages
+    needs: check
+    if: >-
+      needs.check.result == 'success' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Calculate UTC release version
+        id: version
+        shell: bash
+        run: echo "version=$(date -u +'%y.%-m.%-d').${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Maven artifacts to GitHub Packages
+        run: >-
+          ./gradlew publishAllPublicationsToGitHubPackagesRepository
+          -PreleaseVersion=${{ steps.version.outputs.version }}

@@ -7,8 +7,6 @@ pluginManagement {
 }
 
 plugins {
-    // Gradle does not allow version-catalog plugin aliases in settings files.
-    id("com.gradleup.nmcp.settings") version "1.6.1"
 }
 
 dependencyResolutionManagement {
@@ -19,11 +17,3 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "extras"
-
-nmcpSettings {
-    centralPortal {
-        username.set(providers.gradleProperty("centralPortalUsername"))
-        password.set(providers.gradleProperty("centralPortalPassword"))
-        publishingType = "AUTOMATIC"
-    }
-}
