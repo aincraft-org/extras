@@ -3,16 +3,34 @@ package dev.mintychochip.core;
 import dev.mintychochip.api.TradeResult;
 import dev.mintychochip.api.TradeService;
 import dev.mintychochip.api.TradeSnapshot;
+import dev.mintychochip.api.events.ExtrasEvent;
+import java.time.Clock;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/** In-memory, synchronized implementation for transient two-player trades. */
+/**
+ * In-memory, synchronized implementation for transient two-player trades.
+ *
+ * <p>Successful lifecycle transitions publish typed events after the in-memory mutation; failed
+ * operations (unknown requests, non-participants, stale offers, already-confirmed) emit nothing.
+ */
 public final class DefaultTradeService implements TradeService {
+  private final Clock clock;
+  private final InProcessExtrasEventService eventService;
   private final Object lock = new Object();
   private final Map<UUID, UUID> incomingRequests = new HashMap<>();
   private final Map<UUID, TradeState> tradesByPlayer = new HashMap<>();
+
+  public DefaultTradeService() {
+    this(Clock.systemUTC(), InProcessExtrasEventService.noOp());
+  }
+
+  public DefaultTradeService(Clock clock, InProcessExtrasEventService eventService) {
+    this.clock = java.util.Objects.requireNonNull(clock, "clock");
+    this.eventService = java.util.Objects.requireNonNull(eventService, "eventService");
+  }
 
   @Override
   public TradeResult request(UUID requesterId, UUID targetId) {
@@ -29,6 +47,9 @@ public final class DefaultTradeService implements TradeService {
         return TradeResult.REQUEST_EXISTS;
       }
       incomingRequests.put(targetId, requesterId);
+      eventService.publish(
+          new ExtrasEvent.TradeRequested(
+              UUID.randomUUID(), clock.instant(), requesterId, targetId));
       return TradeResult.SUCCESS;
     }
   }
@@ -47,6 +68,9 @@ public final class DefaultTradeService implements TradeService {
       TradeState state = new TradeState(UUID.randomUUID(), requesterId, playerId);
       tradesByPlayer.put(requesterId, state);
       tradesByPlayer.put(playerId, state);
+      eventService.publish(
+          new ExtrasEvent.TradeAccepted(
+              UUID.randomUUID(), clock.instant(), state.tradeId, requesterId, playerId));
       return TradeResult.SUCCESS;
     }
   }
@@ -55,9 +79,12 @@ public final class DefaultTradeService implements TradeService {
   public TradeResult decline(UUID playerId) {
     requireId(playerId);
     synchronized (lock) {
-      if (incomingRequests.remove(playerId) == null) {
+      UUID requesterId = incomingRequests.remove(playerId);
+      if (requesterId == null) {
         return TradeResult.NO_REQUEST;
       }
+      eventService.publish(
+          new ExtrasEvent.TradeDeclined(UUID.randomUUID(), clock.instant(), requesterId, playerId));
       return TradeResult.SUCCESS;
     }
   }
@@ -71,6 +98,9 @@ public final class DefaultTradeService implements TradeService {
         return TradeResult.NOT_PARTICIPANT;
       }
       remove(state);
+      eventService.publish(
+          new ExtrasEvent.TradeCancelled(
+              UUID.randomUUID(), clock.instant(), state.tradeId, playerId));
       return TradeResult.SUCCESS;
     }
   }
@@ -109,6 +139,13 @@ public final class DefaultTradeService implements TradeService {
         return TradeResult.NOT_CONFIRMED;
       }
       remove(state);
+      eventService.publish(
+          new ExtrasEvent.TradeCompleted(
+              UUID.randomUUID(),
+              clock.instant(),
+              state.tradeId,
+              state.firstPlayerId,
+              state.secondPlayerId));
       return TradeResult.SUCCESS;
     }
   }

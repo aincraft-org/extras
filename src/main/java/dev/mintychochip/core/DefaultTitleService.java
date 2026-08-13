@@ -3,6 +3,8 @@ package dev.mintychochip.core;
 import dev.mintychochip.api.TitleProfile;
 import dev.mintychochip.api.TitleResult;
 import dev.mintychochip.api.TitleService;
+import dev.mintychochip.api.events.ExtrasEvent;
+import java.time.Clock;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Objects;
@@ -17,18 +19,29 @@ import java.util.concurrent.ConcurrentMap;
  *
  * <p>Every mutation is guarded by a single internal lock so check-then-act invariants (duplicate
  * grants, equip-of-unowned) are atomic with respect to concurrent callers. Reads hit a cache first,
- * then the store. Title state is created lazily on the first successful mutation.
+ * then the store. Title state is created lazily on the first successful mutation. Events are
+ * published only after the JSON write succeeded, for real state changes; failed and no-op mutations
+ * emit nothing.
  */
 public final class DefaultTitleService implements TitleService {
 
   private static final int MAX_TITLE_LENGTH = 64;
 
   private final TitleRepository repository;
+  private final Clock clock;
+  private final InProcessExtrasEventService eventService;
   private final ConcurrentMap<UUID, MutableTitleProfile> cache = new ConcurrentHashMap<>();
   private final Object mutationLock = new Object();
 
   public DefaultTitleService(TitleRepository repository) {
+    this(repository, Clock.systemUTC(), InProcessExtrasEventService.noOp());
+  }
+
+  public DefaultTitleService(
+      TitleRepository repository, Clock clock, InProcessExtrasEventService eventService) {
     this.repository = Objects.requireNonNull(repository, "repository");
+    this.clock = Objects.requireNonNull(clock, "clock");
+    this.eventService = Objects.requireNonNull(eventService, "eventService");
   }
 
   @Override
@@ -44,6 +57,8 @@ public final class DefaultTitleService implements TitleService {
         return TitleResult.ALREADY_UNLOCKED;
       }
       save(playerId);
+      eventService.publish(
+          new ExtrasEvent.TitleGranted(UUID.randomUUID(), clock.instant(), playerId, trimmed));
       return TitleResult.SUCCESS;
     }
   }
@@ -61,6 +76,8 @@ public final class DefaultTitleService implements TitleService {
         return TitleResult.NOT_UNLOCKED;
       }
       save(playerId);
+      eventService.publish(
+          new ExtrasEvent.TitleRevoked(UUID.randomUUID(), clock.instant(), playerId, trimmed));
       return TitleResult.SUCCESS;
     }
   }
@@ -79,6 +96,8 @@ public final class DefaultTitleService implements TitleService {
       }
       profile.equipTitle(trimmed);
       save(playerId);
+      eventService.publish(
+          new ExtrasEvent.TitleEquipped(UUID.randomUUID(), clock.instant(), playerId, trimmed));
       return TitleResult.SUCCESS;
     }
   }
@@ -88,9 +107,13 @@ public final class DefaultTitleService implements TitleService {
     Objects.requireNonNull(playerId, "playerId");
     synchronized (mutationLock) {
       MutableTitleProfile profile = findMutable(playerId);
-      if (profile != null) {
+      if (profile != null && profile.equippedTitle() != null) {
+        String previouslyEquipped = profile.equippedTitle();
         profile.unequipTitle();
         save(playerId);
+        eventService.publish(
+            new ExtrasEvent.TitleUnequipped(
+                UUID.randomUUID(), clock.instant(), playerId, previouslyEquipped));
       }
       // Nothing equipped (no state / already unequipped) is success.
       return TitleResult.SUCCESS;

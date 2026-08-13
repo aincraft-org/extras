@@ -20,15 +20,16 @@ public interface MailRepository {
   /** Unread mail count for {@code recipient}. */
   int unreadCount(UUID recipient);
 
-  /** Marks a mail read (no-op if unknown). */
-  void markRead(UUID recipient, long mailId);
+  /** Marks a mail read; true when the row existed and was actually changed. */
+  boolean markRead(UUID recipient, long mailId);
 
-  /** Marks a mail unread (no-op if unknown). */
-  void markUnread(UUID recipient, long mailId);
+  /** Marks a mail unread; true when the row existed and was actually changed. */
+  boolean markUnread(UUID recipient, long mailId);
 
   /**
    * Atomically returns the unclaimed attachment blob for {@code mailId} and marks it claimed. Empty
-   * when the mail is unknown, has no attachment, or is already claimed.
+   * when the mail is unknown to {@code recipient} or already claimed; the caller may report a claim
+   * event only when a non-empty result came back.
    */
   Optional<String> claim(UUID recipient, long mailId);
 
@@ -36,10 +37,10 @@ public interface MailRepository {
   boolean delete(UUID recipient, long mailId);
 
   /**
-   * Deletes all READ messages for {@code recipient} in one statement. Returns the number of rows
-   * deleted. Unread/unclaimed messages are kept.
+   * Deletes all READ messages for {@code recipient} in one statement. Returns the ids of the
+   * deleted rows; empty when nothing was deleted. Unread/unclaimed messages are kept.
    */
-  int deleteAllRead(UUID recipient);
+  List<Long> deletedIdsAllRead(UUID recipient);
 
   /** Releases the underlying connection/statement resources. */
   void close();

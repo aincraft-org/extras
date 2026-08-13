@@ -129,13 +129,15 @@ public final class SqliteMailRepository implements MailRepository {
   }
 
   @Override
-  public synchronized void markRead(UUID recipient, long mailId) {
-    update("UPDATE mail SET read = 1 WHERE recipient = ? AND id = ?", recipient, mailId);
+  public synchronized boolean markRead(UUID recipient, long mailId) {
+    return updateChanged(
+        "UPDATE mail SET read = 1 WHERE recipient = ? AND id = ? AND read = 0", recipient, mailId);
   }
 
   @Override
-  public synchronized void markUnread(UUID recipient, long mailId) {
-    update("UPDATE mail SET read = 0 WHERE recipient = ? AND id = ?", recipient, mailId);
+  public synchronized boolean markUnread(UUID recipient, long mailId) {
+    return updateChanged(
+        "UPDATE mail SET read = 0 WHERE recipient = ? AND id = ? AND read = 1", recipient, mailId);
   }
 
   @Override
@@ -187,19 +189,46 @@ public final class SqliteMailRepository implements MailRepository {
   }
 
   @Override
-  public synchronized int deleteAllRead(UUID recipient) {
+  public synchronized List<Long> deletedIdsAllRead(UUID recipient) {
     // Spec clear rule: only READ and (no attachment or already-claimed)
     // messages are bulk-deleted. A read letter whose item is not yet
-    // claimed must survive so the player can still claim it.
-    String sql =
-        "DELETE FROM mail WHERE recipient = ? AND read = 1"
-            + " AND (attachment IS NULL OR claimed = 1)";
-    try (PreparedStatement ps = connection.prepareStatement(sql)) {
-      ps.setString(1, recipient.toString());
-      return ps.executeUpdate();
+    // claimed must survive so the player can still claim it. The deleted
+    // ids are captured inside the same transaction that deletes them.
+    String where = "recipient = ? AND read = 1 AND (attachment IS NULL OR claimed = 1)";
+    try {
+      connection.setAutoCommit(false);
+      List<Long> deletedIds = new ArrayList<>();
+      try {
+        try (PreparedStatement select =
+            connection.prepareStatement("SELECT id FROM mail WHERE " + where)) {
+          select.setString(1, recipient.toString());
+          try (ResultSet rs = select.executeQuery()) {
+            while (rs.next()) {
+              deletedIds.add(rs.getLong(1));
+            }
+          }
+        }
+        try (PreparedStatement ps =
+            connection.prepareStatement("DELETE FROM mail WHERE " + where)) {
+          ps.setString(1, recipient.toString());
+          ps.executeUpdate();
+        }
+        connection.commit();
+        return deletedIds;
+      } catch (SQLException e) {
+        connection.rollback();
+        throw e;
+      }
     } catch (SQLException e) {
       throw new UncheckedIOException(
           "Failed to delete read mail for " + recipient, new java.io.IOException(e));
+    } finally {
+      try {
+        connection.setAutoCommit(true);
+      } catch (SQLException e) {
+        throw new UncheckedIOException(
+            "Failed to reset mail autocommit", new java.io.IOException(e));
+      }
     }
   }
 
@@ -234,11 +263,11 @@ public final class SqliteMailRepository implements MailRepository {
     }
   }
 
-  private void update(String sql, UUID recipient, long mailId) {
+  private boolean updateChanged(String sql, UUID recipient, long mailId) {
     try (PreparedStatement ps = connection.prepareStatement(sql)) {
       ps.setString(1, recipient.toString());
       ps.setLong(2, mailId);
-      ps.executeUpdate();
+      return ps.executeUpdate() > 0;
     } catch (SQLException e) {
       throw new UncheckedIOException("Failed to update mail " + mailId, new IOException(e));
     }

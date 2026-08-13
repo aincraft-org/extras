@@ -4,6 +4,7 @@ import dev.mintychochip.api.Party;
 import dev.mintychochip.api.PartyInvite;
 import dev.mintychochip.api.PartyResult;
 import dev.mintychochip.api.PartyService;
+import dev.mintychochip.api.events.ExtrasEvent;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -32,15 +33,24 @@ public final class DefaultPartyService implements PartyService {
   private final Clock clock;
   private final Duration inviteTtl;
   private final int sizeLimit;
+  private final InProcessExtrasEventService eventService;
   private final Object mutationLock = new Object();
   private final ConcurrentMap<UUID, Party> cache = new ConcurrentHashMap<>();
 
   public DefaultPartyService(PartyRepository repository) {
-    this(repository, Clock.systemUTC(), DEFAULT_INVITE_TTL, DEFAULT_SIZE_LIMIT);
+    this(repository, Clock.systemUTC(), DEFAULT_INVITE_TTL, DEFAULT_SIZE_LIMIT, noOpEvents());
+  }
+
+  public DefaultPartyService(PartyRepository repository, InProcessExtrasEventService eventService) {
+    this(repository, Clock.systemUTC(), DEFAULT_INVITE_TTL, DEFAULT_SIZE_LIMIT, eventService);
   }
 
   public DefaultPartyService(
-      PartyRepository repository, Clock clock, Duration inviteTtl, int sizeLimit) {
+      PartyRepository repository,
+      Clock clock,
+      Duration inviteTtl,
+      int sizeLimit,
+      InProcessExtrasEventService eventService) {
     this.repository = Objects.requireNonNull(repository, "repository");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.inviteTtl = Objects.requireNonNull(inviteTtl, "inviteTtl");
@@ -48,6 +58,11 @@ public final class DefaultPartyService implements PartyService {
       throw new IllegalArgumentException("sizeLimit must be >= 1");
     }
     this.sizeLimit = sizeLimit;
+    this.eventService = Objects.requireNonNull(eventService, "eventService");
+  }
+
+  private static InProcessExtrasEventService noOpEvents() {
+    return InProcessExtrasEventService.noOp();
   }
 
   @Override
@@ -67,6 +82,7 @@ public final class DefaultPartyService implements PartyService {
       Party party = new Party(partyId, normalized, playerId, List.of(playerId), now);
       repository.createParty(partyId, normalized, playerId, now);
       cache.put(playerId, party);
+      eventService.publish(new ExtrasEvent.PartyCreated(UUID.randomUUID(), now, party));
       return PartyResult.SUCCESS;
     }
   }
@@ -94,6 +110,11 @@ public final class DefaultPartyService implements PartyService {
       boolean already =
           repository.findInvite(current.partyId(), targetId, clock.instant()).isPresent();
       repository.upsertInvite(current.partyId(), targetId, actorId, expiry);
+      if (!already) {
+        eventService.publish(
+            new ExtrasEvent.PartyInviteCreated(
+                UUID.randomUUID(), clock.instant(), current.partyId(), actorId, targetId, expiry));
+      }
       return already ? PartyResult.ALREADY_INVITED : PartyResult.SUCCESS;
     }
   }
@@ -122,6 +143,9 @@ public final class DefaultPartyService implements PartyService {
       for (UUID memberId : refreshed.memberIds()) {
         cache.put(memberId, refreshed);
       }
+      eventService.publish(
+          new ExtrasEvent.PartyInviteAccepted(
+              UUID.randomUUID(), clock.instant(), partyId, playerId));
       return PartyResult.SUCCESS;
     }
   }
@@ -135,6 +159,9 @@ public final class DefaultPartyService implements PartyService {
         return PartyResult.NO_INVITE;
       }
       repository.deleteInvite(partyId, playerId);
+      eventService.publish(
+          new ExtrasEvent.PartyInviteDeclined(
+              UUID.randomUUID(), clock.instant(), partyId, playerId));
       return PartyResult.SUCCESS;
     }
   }
@@ -147,32 +174,39 @@ public final class DefaultPartyService implements PartyService {
       if (current == null) {
         return PartyResult.NOT_IN_PARTY;
       }
+      Instant now = clock.instant();
       if (current.isLeader(playerId)) {
-        leaveAsLeader(current, playerId);
+        List<UUID> remaining = new ArrayList<>(current.memberIds());
+        remaining.remove(playerId);
+        if (remaining.isEmpty()) {
+          repository.deleteParty(current.partyId());
+          cache.remove(playerId);
+          eventService.publish(
+              new ExtrasEvent.PartyDisbanded(
+                  UUID.randomUUID(), now, current.partyId(), playerId, current.memberIds()));
+        } else {
+          UUID newLeader = remaining.get(0);
+          repository.leaderLeaves(current.partyId(), playerId, newLeader);
+          Party refreshed = repository.findById(current.partyId()).orElseThrow();
+          hitCache(refreshed);
+          cache.remove(playerId);
+          eventService.publish(
+              new ExtrasEvent.PartyMemberLeft(UUID.randomUUID(), now, current.partyId(), playerId));
+          eventService.publish(
+              new ExtrasEvent.PartyLeadershipTransferred(
+                  UUID.randomUUID(), now, current.partyId(), playerId, newLeader));
+        }
       } else {
         repository.removeMember(current.partyId(), playerId);
         Party refreshed = repository.findById(current.partyId()).orElseThrow();
         hitCache(refreshed);
         cache.remove(playerId);
+        eventService.publish(
+            new ExtrasEvent.PartyMemberLeft(
+                UUID.randomUUID(), clock.instant(), current.partyId(), playerId));
       }
       return PartyResult.SUCCESS;
     }
-  }
-
-  /** Called with {@link #mutationLock} held. */
-  private void leaveAsLeader(Party party, UUID leaderId) {
-    List<UUID> remaining = new ArrayList<>(party.memberIds());
-    remaining.remove(leaderId);
-    if (remaining.isEmpty()) {
-      repository.deleteParty(party.partyId());
-      cache.remove(leaderId);
-      return;
-    }
-    UUID newLeader = remaining.get(0);
-    repository.leaderLeaves(party.partyId(), leaderId, newLeader);
-    Party refreshed = repository.findById(party.partyId()).orElseThrow();
-    hitCache(refreshed);
-    cache.remove(leaderId);
   }
 
   @Override
@@ -197,6 +231,9 @@ public final class DefaultPartyService implements PartyService {
       Party refreshed = repository.findById(party.partyId()).orElseThrow();
       hitCache(refreshed);
       cache.remove(targetId);
+      eventService.publish(
+          new ExtrasEvent.PartyMemberKicked(
+              UUID.randomUUID(), clock.instant(), party.partyId(), actorId, targetId));
       return PartyResult.SUCCESS;
     }
   }
@@ -216,6 +253,9 @@ public final class DefaultPartyService implements PartyService {
       for (UUID memberId : party.memberIds()) {
         cache.remove(memberId);
       }
+      eventService.publish(
+          new ExtrasEvent.PartyDisbanded(
+              UUID.randomUUID(), clock.instant(), party.partyId(), actorId, party.memberIds()));
       return PartyResult.SUCCESS;
     }
   }
@@ -238,6 +278,9 @@ public final class DefaultPartyService implements PartyService {
       repository.setLeader(party.partyId(), targetId);
       Party refreshed = repository.findById(party.partyId()).orElseThrow();
       hitCache(refreshed);
+      eventService.publish(
+          new ExtrasEvent.PartyLeadershipTransferred(
+              UUID.randomUUID(), clock.instant(), party.partyId(), actorId, targetId));
       return PartyResult.SUCCESS;
     }
   }
@@ -329,6 +372,9 @@ public final class DefaultPartyService implements PartyService {
       Party refreshed = repository.findById(current.partyId()).orElseThrow();
       hitCache(refreshed);
       evict(playerId);
+      eventService.publish(
+          new ExtrasEvent.PartyLeadershipTransferred(
+              UUID.randomUUID(), clock.instant(), current.partyId(), playerId, newLeader));
     }
   }
 

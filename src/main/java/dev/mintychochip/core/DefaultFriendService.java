@@ -3,6 +3,7 @@ package dev.mintychochip.core;
 import dev.mintychochip.api.FriendRequest;
 import dev.mintychochip.api.FriendResult;
 import dev.mintychochip.api.FriendService;
+import dev.mintychochip.api.events.ExtrasEvent;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -14,21 +15,29 @@ import java.util.UUID;
  *
  * <p>Every mutation is guarded by a single internal lock so invariants that require a
  * check-then-act (duplicate requests, "already friends") are atomic with respect to concurrent
- * callers. Reads are lock-free.
+ * callers. Reads are lock-free. Successful mutations publish committed-state events after leaving
+ * the lock.
  */
 public final class DefaultFriendService implements FriendService {
 
   private final FriendRepository repository;
   private final Clock clock;
+  private final InProcessExtrasEventService eventService;
   private final Object mutationLock = new Object();
 
   public DefaultFriendService(FriendRepository repository) {
-    this(repository, Clock.systemUTC());
+    this(repository, Clock.systemUTC(), InProcessExtrasEventService.noOp());
   }
 
   public DefaultFriendService(FriendRepository repository, Clock clock) {
+    this(repository, clock, InProcessExtrasEventService.noOp());
+  }
+
+  public DefaultFriendService(
+      FriendRepository repository, Clock clock, InProcessExtrasEventService eventService) {
     this.repository = Objects.requireNonNull(repository, "repository");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.eventService = Objects.requireNonNull(eventService, "eventService");
   }
 
   @Override
@@ -50,6 +59,9 @@ public final class DefaultFriendService implements FriendService {
         return FriendResult.REQUEST_EXISTS;
       }
       repository.upsertRequest(requesterId, targetId, clock.instant());
+      publish(
+          new ExtrasEvent.FriendRequestCreated(
+              UUID.randomUUID(), clock.instant(), requesterId, targetId));
       return FriendResult.SUCCESS;
     }
   }
@@ -68,6 +80,8 @@ public final class DefaultFriendService implements FriendService {
       Instant now = clock.instant();
       repository.deleteRequest(requesterId, recipientId);
       repository.addFriendship(recipientId, requesterId, now);
+      publish(
+          new ExtrasEvent.FriendRequestAccepted(UUID.randomUUID(), now, requesterId, recipientId));
       return FriendResult.SUCCESS;
     }
   }
@@ -81,6 +95,9 @@ public final class DefaultFriendService implements FriendService {
         return FriendResult.NO_REQUEST;
       }
       repository.deleteRequest(requesterId, recipientId);
+      publish(
+          new ExtrasEvent.FriendRequestDeclined(
+              UUID.randomUUID(), clock.instant(), requesterId, recipientId));
       return FriendResult.SUCCESS;
     }
   }
@@ -94,6 +111,9 @@ public final class DefaultFriendService implements FriendService {
         return FriendResult.NO_REQUEST;
       }
       repository.deleteRequest(requesterId, targetId);
+      publish(
+          new ExtrasEvent.FriendRequestCancelled(
+              UUID.randomUUID(), clock.instant(), requesterId, targetId));
       return FriendResult.SUCCESS;
     }
   }
@@ -107,6 +127,8 @@ public final class DefaultFriendService implements FriendService {
         return FriendResult.NOT_FRIENDS;
       }
       repository.deleteFriendship(actorId, targetId);
+      publish(
+          new ExtrasEvent.FriendshipRemoved(UUID.randomUUID(), clock.instant(), actorId, targetId));
       return FriendResult.SUCCESS;
     }
   }
@@ -134,6 +156,11 @@ public final class DefaultFriendService implements FriendService {
   public List<UUID> friendIdsOf(UUID playerId) {
     Objects.requireNonNull(playerId, "playerId");
     return List.copyOf(repository.findFriendIds(playerId));
+  }
+
+  /** Publishes {@code event} after the mutation lock is released. */
+  private void publish(ExtrasEvent event) {
+    eventService.publish(event);
   }
 
   /** Closes the backing store. */
