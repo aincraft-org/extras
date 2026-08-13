@@ -8,7 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.mintychochip.api.MailMessage;
 import dev.mintychochip.api.MailboxView;
 import dev.mintychochip.api.SendMailResult;
+import dev.mintychochip.api.events.ExtrasEvent;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -24,11 +28,15 @@ class DefaultMailServiceTest {
   private UUID bob = UUID.randomUUID();
   private SqliteMailRepository repository;
   private DefaultMailService service;
+  private InProcessExtrasEventService bus;
+  private final List<ExtrasEvent> events = new ArrayList<>();
 
   @BeforeEach
   void setUp() {
     repository = new SqliteMailRepository(tempDir.resolve("mail.db"));
-    service = new DefaultMailService(repository);
+    bus = new InProcessExtrasEventService(failure -> {});
+    bus.subscribe(events::add);
+    service = new DefaultMailService(repository, Clock.systemUTC(), bus);
   }
 
   @AfterEach
@@ -147,5 +155,142 @@ class DefaultMailServiceTest {
     assertEquals(0, view.total());
     assertEquals(0, view.unreadCount());
     assertTrue(view.messages().isEmpty());
+  }
+
+  // --------------------------------------------------------------- events
+
+  @Test
+  void sendEmitMailSent() {
+    assertEquals(SendMailResult.SUCCESS, service.send(alice, bob, "Alice", "hello", null));
+    assertSingleEvent(
+        ExtrasEvent.MailSent.class,
+        event -> {
+          assertEquals(alice, event.senderId());
+          assertEquals(bob, event.recipientId());
+          assertTrue(event.mailId() > 0);
+        });
+  }
+
+  @Test
+  void readAndUnreadEmitEvents() {
+    service.send(alice, bob, "Alice", "hello", null);
+    long mailId = service.mailbox(bob, 0, 10).messages().get(0).id();
+    events.clear();
+
+    service.markRead(bob, mailId);
+    assertSingleEvent(
+        ExtrasEvent.MailRead.class,
+        event -> {
+          assertEquals(bob, event.recipientId());
+          assertEquals(mailId, event.mailId());
+        });
+
+    service.markUnread(bob, mailId);
+    assertSingleEvent(
+        ExtrasEvent.MailUnread.class,
+        event -> {
+          assertEquals(bob, event.recipientId());
+          assertEquals(mailId, event.mailId());
+        });
+  }
+
+  @Test
+  void noOpMarksEmitNoEvents() {
+    service.send(alice, bob, "Alice", "hello", null);
+    long mailId = service.mailbox(bob, 0, 10).messages().get(0).id();
+    service.markRead(bob, mailId);
+    events.clear();
+
+    // Unknown id.
+    service.markRead(bob, 999L);
+    service.markUnread(bob, 999L);
+    // Repeat mark that changes nothing.
+    service.markRead(bob, mailId);
+    // Unread then read again before the repeat.
+    service.markUnread(bob, mailId);
+    service.markRead(bob, mailId);
+    events.clear();
+
+    service.markRead(bob, mailId);
+    service.markUnread(bob, 777L);
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void claimEmitsEventOnlyWhenBlobReturned() {
+    service.send(alice, bob, "Alice", "with item", "blob-1");
+    long mailId = service.mailbox(bob, 0, 10).messages().get(0).id();
+    events.clear();
+
+    assertEquals(Optional.of("blob-1"), service.claimAttachment(bob, mailId));
+    assertSingleEvent(
+        ExtrasEvent.MailAttachmentClaimed.class,
+        event -> {
+          assertEquals(bob, event.recipientId());
+          assertEquals(mailId, event.mailId());
+        });
+
+    // Second claim finds nothing and emits nothing.
+    assertEquals(Optional.empty(), service.claimAttachment(bob, mailId));
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void deleteEmitsEventOnlyWhenRowRemoved() {
+    service.send(alice, bob, "Alice", "delete me", null);
+    long mailId = service.mailbox(bob, 0, 10).messages().get(0).id();
+    events.clear();
+
+    assertFalse(service.delete(bob, 999L));
+    assertTrue(events.isEmpty());
+    assertTrue(service.delete(bob, mailId));
+    assertSingleEvent(
+        ExtrasEvent.MailDeleted.class,
+        event -> {
+          assertEquals(bob, event.recipientId());
+          assertEquals(mailId, event.mailId());
+        });
+  }
+
+  @Test
+  void deleteAllReadEmitsOneEventPerDeletedMail() {
+    service.send(alice, bob, "Alice", "read plain", null);
+    long readPlainId = service.mailbox(bob, 0, 10).messages().get(0).id();
+    service.markRead(bob, readPlainId);
+    service.send(alice, bob, "Alice", "read with item", "{\"format\":1}");
+    long readUnclaimedId = service.mailbox(bob, 0, 10).messages().get(0).id();
+    service.markRead(bob, readUnclaimedId);
+    service.send(alice, bob, "Alice", "unread", null);
+    events.clear();
+
+    assertEquals(1, service.deleteAllRead(bob));
+    assertSingleEvent(
+        ExtrasEvent.MailDeleted.class,
+        event -> {
+          assertEquals(bob, event.recipientId());
+          assertEquals(readPlainId, event.mailId());
+        });
+
+    // Nothing qualifies now: zero rows, zero events.
+    assertEquals(0, service.deleteAllRead(bob));
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void invalidSendsEmitNoEvents() {
+    assertEquals(SendMailResult.INVALID_MESSAGE, service.send(alice, bob, "Alice", "   ", null));
+    assertEquals(
+        SendMailResult.INVALID_MESSAGE, service.send(alice, bob, "Alice", "x".repeat(2001), null));
+    assertEquals(SendMailResult.SELF_MAIL, service.send(alice, alice, "Alice", "hi", null));
+    assertTrue(events.isEmpty());
+  }
+
+  private <E extends ExtrasEvent> void assertSingleEvent(
+      Class<E> type, java.util.function.Consumer<E> assertions) {
+    assertEquals(1, events.size(), "expected exactly one event, got: " + events);
+    ExtrasEvent event = events.get(0);
+    assertTrue(type.isInstance(event), "expected " + type.getSimpleName() + " but got " + event);
+    assertions.accept(type.cast(event));
+    events.clear();
   }
 }

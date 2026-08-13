@@ -86,8 +86,20 @@ class SqliteMailRepositoryTest {
 
   @Test
   void markReadIsNoOpForUnknownId() {
-    repository.markRead(alice, 999L);
+    assertFalse(repository.markRead(alice, 999L));
+    assertFalse(repository.markUnread(alice, 999L));
     assertEquals(0, repository.count(alice));
+  }
+
+  @Test
+  void markReportsActualChange() {
+    MailMessage mail =
+        repository.insert(new MailMessage(0, alice, "Alice", "toggle", 1_000L, false, null));
+    assertTrue(repository.markRead(alice, mail.id()));
+    // Marking read again changes nothing.
+    assertFalse(repository.markRead(alice, mail.id()));
+    assertTrue(repository.markUnread(alice, mail.id()));
+    assertFalse(repository.markUnread(alice, mail.id()));
   }
 
   @Test
@@ -166,7 +178,7 @@ class SqliteMailRepositoryTest {
     // Only readPlain (read, no attachment) qualifies; readUnclaimed has an
     // unclaimed attachment and must survive (still read) so the item stays
     // claimable; unread always survives.
-    assertEquals(1, repository.deleteAllRead(alice));
+    assertEquals(List.of(readPlain.id()), repository.deletedIdsAllRead(alice));
     assertEquals(2, repository.count(alice));
 
     List<MailMessage> remaining = repository.list(alice, 0, 10);
@@ -186,8 +198,22 @@ class SqliteMailRepositoryTest {
     repository.markRead(alice, mail.id());
     assertEquals(Optional.of("blob"), repository.claim(alice, mail.id()));
 
-    assertEquals(1, repository.deleteAllRead(alice));
+    assertEquals(List.of(mail.id()), repository.deletedIdsAllRead(alice));
     assertEquals(0, repository.count(alice));
+  }
+
+  @Test
+  void deleteAllReadWithNothingQualifyingReturnsEmpty() {
+    MailMessage unread =
+        repository.insert(new MailMessage(0, alice, "Alice", "unread", 1_000L, false, null));
+    MailMessage readUnclaimed =
+        repository.insert(new MailMessage(0, alice, "Alice", "read item", 2_000L, false, "blob"));
+    repository.markRead(alice, readUnclaimed.id());
+
+    assertTrue(repository.deletedIdsAllRead(alice).isEmpty());
+    assertEquals(
+        List.of(readUnclaimed.id(), unread.id()),
+        repository.list(alice, 0, 10).stream().map(MailMessage::id).toList());
   }
 
   @Test

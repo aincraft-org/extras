@@ -8,12 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.mintychochip.api.Party;
 import dev.mintychochip.api.PartyInvite;
 import dev.mintychochip.api.PartyResult;
+import dev.mintychochip.api.events.ExtrasEvent;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,6 +41,8 @@ class DefaultPartyServiceTest {
 
   private Instant now;
   private DefaultPartyService service;
+  private InProcessExtrasEventService bus;
+  private final List<ExtrasEvent> events = new ArrayList<>();
 
   private final UUID alice = UUID.randomUUID();
   private final UUID bob = UUID.randomUUID();
@@ -80,12 +84,15 @@ class DefaultPartyServiceTest {
   void setUp() {
     now = Instant.parse("2026-08-08T12:00:00Z");
     clock = new MutableClock(now);
+    bus = new InProcessExtrasEventService(failure -> {});
+    bus.subscribe(events::add);
     service =
         new DefaultPartyService(
             new SqlitePartyRepository(tempDir.resolve("party-" + UUID.randomUUID() + ".db")),
             clock,
             TTL,
-            SIZE_LIMIT);
+            SIZE_LIMIT,
+            bus);
   }
 
   // ----------------------------------------------------------- creation
@@ -415,5 +422,188 @@ class DefaultPartyServiceTest {
     assertTrue(reloaded.isPresent());
     assertEquals(alice, reloaded.get().leaderId());
     assertEquals(2, reloaded.get().memberIds().size());
+  }
+
+  // -------------------------------------------------------------- events
+
+  @Test
+  void createAndInviteEmitEvents() {
+    assertEquals(PartyResult.SUCCESS, service.createParty(alice, "raiders"));
+    assertSingleEvent(
+        ExtrasEvent.PartyCreated.class,
+        event -> {
+          assertEquals(alice, event.party().leaderId());
+          assertEquals("raiders", event.party().name());
+        });
+    assertEquals(PartyResult.SUCCESS, service.invite(alice, bob));
+    assertSingleEvent(
+        ExtrasEvent.PartyInviteCreated.class,
+        event -> {
+          assertEquals(alice, event.inviterId());
+          assertEquals(bob, event.inviteeId());
+        });
+  }
+
+  @Test
+  void acceptAndDeclineEmitEvents() {
+    service.createParty(alice, null);
+    UUID partyId = service.partyOf(alice).get().partyId();
+    service.invite(alice, bob);
+    service.invite(alice, carol);
+    events.clear();
+    assertEquals(PartyResult.SUCCESS, service.acceptInvite(bob, partyId));
+    assertSingleEvent(
+        ExtrasEvent.PartyInviteAccepted.class,
+        event -> {
+          assertEquals(partyId, event.partyId());
+          assertEquals(bob, event.inviteeId());
+        });
+    assertEquals(PartyResult.SUCCESS, service.declineInvite(carol, partyId));
+    assertSingleEvent(
+        ExtrasEvent.PartyInviteDeclined.class,
+        event -> {
+          assertEquals(partyId, event.partyId());
+          assertEquals(carol, event.inviteeId());
+        });
+  }
+
+  @Test
+  void memberLeaveEmitsMemberLeft() {
+    service.createParty(alice, null);
+    UUID partyId = service.partyOf(alice).get().partyId();
+    service.invite(alice, bob);
+    service.acceptInvite(bob, partyId);
+    events.clear();
+    assertEquals(PartyResult.SUCCESS, service.leaveParty(bob));
+    assertSingleEvent(
+        ExtrasEvent.PartyMemberLeft.class,
+        event -> {
+          assertEquals(partyId, event.partyId());
+          assertEquals(bob, event.memberId());
+        });
+  }
+
+  @Test
+  void leaderLeaveWithMembersEmitsLeftAndTransfer() {
+    service.createParty(alice, null);
+    UUID partyId = service.partyOf(alice).get().partyId();
+    service.invite(alice, bob);
+    service.acceptInvite(bob, partyId);
+    clock.advanceTo(now.plusSeconds(1));
+    service.invite(alice, carol);
+    service.acceptInvite(carol, partyId);
+    events.clear();
+    assertEquals(PartyResult.SUCCESS, service.leaveParty(alice));
+    assertEvents(
+        List.of(ExtrasEvent.PartyMemberLeft.class, ExtrasEvent.PartyLeadershipTransferred.class),
+        events1 -> {
+          ExtrasEvent.PartyMemberLeft left = (ExtrasEvent.PartyMemberLeft) events1.get(0);
+          assertEquals(alice, left.memberId());
+          ExtrasEvent.PartyLeadershipTransferred transferred =
+              (ExtrasEvent.PartyLeadershipTransferred) events1.get(1);
+          assertEquals(alice, transferred.oldLeaderId());
+          assertEquals(bob, transferred.newLeaderId());
+        });
+  }
+
+  @Test
+  void soloLeaderLeaveEmitsDisbanded() {
+    service.createParty(alice, null);
+    events.clear();
+    assertEquals(PartyResult.SUCCESS, service.leaveParty(alice));
+    assertSingleEvent(
+        ExtrasEvent.PartyDisbanded.class,
+        event -> {
+          assertEquals(alice, event.leaderId());
+          assertEquals(List.of(alice), event.formerMemberIds());
+        });
+  }
+
+  @Test
+  void kickAndDisbandEmitEvents() {
+    service.createParty(alice, null);
+    UUID partyId = service.partyOf(alice).get().partyId();
+    service.invite(alice, bob);
+    service.acceptInvite(bob, partyId);
+    events.clear();
+    assertEquals(PartyResult.SUCCESS, service.kick(alice, bob));
+    assertSingleEvent(
+        ExtrasEvent.PartyMemberKicked.class,
+        event -> {
+          assertEquals(alice, event.actorId());
+          assertEquals(bob, event.memberId());
+        });
+    assertEquals(PartyResult.SUCCESS, service.disband(alice));
+    assertSingleEvent(
+        ExtrasEvent.PartyDisbanded.class,
+        event -> {
+          assertEquals(partyId, event.partyId());
+          assertEquals(List.of(alice), event.formerMemberIds());
+        });
+  }
+
+  @Test
+  void transferAndLogoutEmitLeadershipTransferred() {
+    service.createParty(alice, null);
+    UUID partyId = service.partyOf(alice).get().partyId();
+    service.invite(alice, bob);
+    service.acceptInvite(bob, partyId);
+    events.clear();
+    assertEquals(PartyResult.SUCCESS, service.transferLeadership(alice, bob));
+    assertSingleEvent(
+        ExtrasEvent.PartyLeadershipTransferred.class,
+        event -> {
+          assertEquals(partyId, event.partyId());
+          assertEquals(alice, event.oldLeaderId());
+          assertEquals(bob, event.newLeaderId());
+        });
+
+    service.transferLeadership(bob, alice);
+    events.clear();
+    service.logout(alice);
+    assertSingleEvent(
+        ExtrasEvent.PartyLeadershipTransferred.class,
+        event -> assertEquals(bob, event.newLeaderId()));
+  }
+
+  @Test
+  void failedMutationsEmitNoEvents() {
+    assertEquals(PartyResult.NOT_IN_PARTY, service.leaveParty(alice));
+    assertEquals(PartyResult.NOT_IN_PARTY, service.kick(alice, bob));
+    assertEquals(PartyResult.NOT_IN_PARTY, service.disband(alice));
+    service.createParty(alice, null);
+    UUID partyId = service.partyOf(alice).get().partyId();
+    service.invite(alice, bob);
+    service.acceptInvite(bob, partyId);
+    events.clear();
+    assertEquals(PartyResult.SELF_INVITE, service.invite(alice, alice));
+    assertEquals(PartyResult.NO_INVITE, service.acceptInvite(carol, UUID.randomUUID()));
+    assertEquals(PartyResult.NO_INVITE, service.declineInvite(carol, UUID.randomUUID()));
+    assertEquals(PartyResult.NOT_LEADER, service.disband(bob));
+    assertEquals(PartyResult.NOT_A_MEMBER, service.transferLeadership(alice, carol));
+    assertTrue(events.isEmpty());
+  }
+
+  private <E extends ExtrasEvent> void assertSingleEvent(
+      Class<E> type, java.util.function.Consumer<E> assertions) {
+    assertEquals(1, events.size(), "expected exactly one event, got: " + events);
+    ExtrasEvent event = events.get(0);
+    assertTrue(type.isInstance(event), "expected " + type.getSimpleName() + " but got " + event);
+    assertions.accept(type.cast(event));
+    events.clear();
+  }
+
+  private void assertEvents(
+      List<? extends Class<? extends ExtrasEvent>> types,
+      java.util.function.Consumer<List<ExtrasEvent>> assertions) {
+    assertEquals(
+        types.size(), events.size(), "expected " + types.size() + " events, got: " + events);
+    for (int i = 0; i < types.size(); i++) {
+      assertTrue(
+          types.get(i).isInstance(events.get(i)),
+          "expected " + types.get(i).getSimpleName() + " but got " + events.get(i));
+    }
+    assertions.accept(events);
+    events.clear();
   }
 }
