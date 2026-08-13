@@ -26,8 +26,13 @@ class PluginDescriptorTest {
           "standalone mailbox main class must not remain in the descriptor");
       assertTrue(yaml.contains("folia-supported: true"), "folia-supported should be true");
       assertTrue(yaml.contains("api-version: '1.21'"), "api-version should be 1.21");
-      assertTrue(yaml.contains("extras.mail.use:"), "mail permission should be declared");
-      assertTrue(yaml.contains("default: true"), "mail permission should be granted by default");
+      assertTrue(
+          yaml.contains(
+              "description: Persistent parties, friendships, titles, player mailboxes, and item trading, and chat channels."),
+          "plugin description should mention chat channels");
+      assertTrue(yaml.contains("extras.chat.use:"), "chat permission should be declared");
+      assertTrue(yaml.contains("default: true"), "chat permission should be granted by default");
+      assertTrue(yaml.contains("aliases: [ch, c]"), "chat aliases should be declared");
     }
   }
 
@@ -35,5 +40,17 @@ class PluginDescriptorTest {
   void mainClassExtendsJavaPlugin() throws ClassNotFoundException {
     Class<?> main = Class.forName("dev.mintychochip.ExtrasPlugin");
     assertTrue(org.bukkit.plugin.java.JavaPlugin.class.isAssignableFrom(main));
+  }
+
+  @Test
+  void pluginHoldsAndRegistersEventService() throws Exception {
+    Class<?> plugin = Class.forName("dev.mintychochip.ExtrasPlugin");
+    plugin.getDeclaredField("eventService");
+    Class<?> eventApi = Class.forName("dev.mintychochip.api.events.ExtrasEventService");
+    assertTrue(eventApi.isInterface(), "ExtrasEventService should be an SPI interface");
+    Class<?> subscription = Class.forName("dev.mintychochip.api.events.EventSubscription");
+    assertTrue(
+        java.lang.AutoCloseable.class.isAssignableFrom(subscription),
+        "EventSubscription should be AutoCloseable");
   }
 }

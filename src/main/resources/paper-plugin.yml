@@ -3,10 +3,34 @@ version: '${version}'
 main: dev.mintychochip.ExtrasPlugin
 api-version: '1.21'
 folia-supported: true
-description: Persistent parties, friendships, titles, player mailboxes, and item trading.
+description: Persistent parties, friendships, titles, player mailboxes, and item trading, and chat channels.
 author: jlo
 website: https://github.com/aincraft-org/modular-extras
+commands:
+  chat:
+    description: Manage chat channels and preferences.
+    aliases: [ch, c]
+    permission: extras.chat.use
+    permission-message: You do not have permission to use chat.
 permissions:
   extras.mail.use:
     description: Open mailbox, send, read, delete own mail
+    default: true
+  extras.chat.use:
+    description: Use chat channels and manage chat preferences
+    default: true
+  extras.chat.channel.global:
+    description: Use global chat
+    default: true
+  extras.chat.channel.local:
+    description: Use local chat
+    default: true
+  extras.chat.channel.party:
+    description: Use party chat
+    default: true
+  extras.chat.channel.market:
+    description: Use market chat
+    default: true
+  extras.chat.channel.lfg:
+    description: Use LFG chat
     default: true
