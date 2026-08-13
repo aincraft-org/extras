@@ -34,3 +34,9 @@ permissions:
   extras.chat.channel.lfg:
     description: Use LFG chat
     default: true
+  extras.rewards.use:
+    description: View and claim daily rewards, streaks, and leaderboards
+    default: true
+  extras.rewards.admin:
+    description: Reroll and administer daily rewards
+    default: op

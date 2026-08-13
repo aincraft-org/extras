@@ -1,0 +1,37 @@
+provider:
+  mode: OPTIONAL
+  endpoint: ""
+criterion-pool:
+  - id: ore-day
+    type: MINE_BLOCKS
+    block: minecraft:diamond_ore
+    target: 16
+    description: Mine 16 Diamond Ore
+  - id: hunter-day
+    type: KILL_ENTITIES
+    entity: minecraft:zombie
+    target: 30
+    description: Kill 30 Zombies
+  - id: crafter-day
+    type: CRAFT_ITEMS
+    item: minecraft:iron_ingot
+    target: 16
+    description: Craft 16 Iron Ingots
+  - id: xp-day
+    type: GAIN_XP
+    target: 500
+    description: Earn 500 XP
+  - id: login-day
+    type: LOGIN_DAYS
+    target: 1
+    description: Log in today
+  - id: play-day
+    type: PLAY_TIME
+    target: 3600
+    description: Play for one hour
+daily-reward:
+  type: XP
+  payload: xp
+  amount: 500
+command-allowlist:
+  - give

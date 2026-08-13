@@ -33,6 +33,9 @@ class PluginDescriptorTest {
       assertTrue(yaml.contains("extras.chat.use:"), "chat permission should be declared");
       assertTrue(yaml.contains("default: true"), "chat permission should be granted by default");
       assertTrue(yaml.contains("aliases: [ch, c]"), "chat aliases should be declared");
+      assertTrue(yaml.contains("extras.rewards.use:"), "rewards use permission should be declared");
+      assertTrue(
+          yaml.contains("extras.rewards.admin:"), "rewards admin permission should be declared");
     }
   }
 
