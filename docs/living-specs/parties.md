@@ -55,6 +55,7 @@ grouping).
 - [x] SQLite repository with transactions, cascade delete, expiry filtering
 - [x] `DefaultPartyService` with cap/leadership/invite invariants
 - [x] `/party` BasicCommand + presence listener + ServicesManager registration
+- [x] Committed-domain events for create/invite/accept/decline/leave/kick/disband/transfer
 - [x] Green build: 26 tests, shaded jar
 
 ## Next

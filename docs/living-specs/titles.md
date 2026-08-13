@@ -57,6 +57,7 @@ holds an unordered set of unlocked titles and may equip at most one at a time.
 - [x] `TitleService` SPI (grant/revoke/equip/unequip/read views)
 - [x] `DefaultTitleService` with lazy state + `JsonTitleRepository` codec
 - [x] `/title` command (grant/revoke/equip/unequip/list) + admin permission
+- [x] Committed-domain events for grant/revoke/equip/unequip (actual changes only)
 - [x] Green build: 62 tests, shaded jar
 
 ## Next

@@ -62,6 +62,7 @@ and presence announcements to online friends.
 - [x] SQLite repository (`friend_requests`, `friendships`) with transactions
 - [x] `DefaultFriendService` with mutual/canonical invariants
 - [x] `/friend` command (request/add, accept/decline/deny, cancel, remove, list, requests) + presence listener
+- [x] Committed-domain events for request/accept/decline/cancel/removal
 - [x] Green build: 48 tests, shaded jar
 
 ## Next
