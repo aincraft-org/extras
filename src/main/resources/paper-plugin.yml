@@ -12,6 +12,10 @@ commands:
     aliases: [ch, c]
     permission: extras.chat.use
     permission-message: You do not have permission to use chat.
+  social:
+    description: Open the MapGUI social menu.
+    permission: extras.social.use
+    permission-message: You do not have permission to use the social menu.
 permissions:
   extras.mail.use:
     description: Open mailbox, send, read, delete own mail
@@ -40,3 +44,12 @@ permissions:
   extras.rewards.admin:
     description: Reroll and administer daily rewards
     default: op
+  extras.social.use:
+    description: Open the MapGUI social menu
+    default: true
+dependencies:
+  server:
+    MapGUI:
+      load: BEFORE
+      required: true
+      join-classpath: true

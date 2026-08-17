@@ -18,7 +18,7 @@ val mainSourceSet = sourceSets.getByName("main")
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
+        languageVersion.set(JavaLanguageVersion.of(25))
     }
 }
 
@@ -173,6 +173,7 @@ repositories {
 
 dependencies {
     compileOnly(libs.paper.api)
+    compileOnly(libs.mapgui.api)
     implementation(libs.sqlite.jdbc)
 
     testImplementation(libs.paper.api)
