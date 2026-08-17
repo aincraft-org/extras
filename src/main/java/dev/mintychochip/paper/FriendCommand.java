@@ -1,8 +1,10 @@
 package dev.mintychochip.paper;
 
+import de.flog99.mapgui.MapGui;
 import dev.mintychochip.api.FriendRequest;
 import dev.mintychochip.api.FriendResult;
 import dev.mintychochip.api.FriendService;
+import dev.mintychochip.api.PartyService;
 import io.papermc.paper.command.brigadier.BasicCommand;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.ArrayList;
@@ -21,9 +23,11 @@ import org.bukkit.entity.Player;
 public final class FriendCommand implements BasicCommand {
 
   private final FriendService friendService;
+  private final PartyService partyService;
 
-  public FriendCommand(FriendService friendService) {
+  public FriendCommand(FriendService friendService, PartyService partyService) {
     this.friendService = friendService;
+    this.partyService = partyService;
   }
 
   @Override
@@ -199,6 +203,13 @@ public final class FriendCommand implements BasicCommand {
     UUID playerId = PlayerIds.requirePlayer(sender);
     if (playerId == null) {
       return;
+    }
+    if (sender instanceof Player player) {
+      var mapGui = MapGui.get();
+      if (mapGui != null) {
+        mapGui.open(player, new SocialScreen(friendService, partyService, SocialTab.FRIENDS));
+        return;
+      }
     }
     List<UUID> friendIds = friendService.friendIdsOf(playerId);
     if (friendIds.isEmpty()) {

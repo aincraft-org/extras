@@ -1,5 +1,7 @@
 package dev.mintychochip.paper;
 
+import de.flog99.mapgui.MapGui;
+import dev.mintychochip.api.FriendService;
 import dev.mintychochip.api.Party;
 import dev.mintychochip.api.PartyInvite;
 import dev.mintychochip.api.PartyResult;
@@ -23,9 +25,11 @@ import org.bukkit.entity.Player;
 public final class PartyCommand implements BasicCommand {
 
   private final PartyService partyService;
+  private final FriendService friendService;
 
-  public PartyCommand(PartyService partyService) {
+  public PartyCommand(PartyService partyService, FriendService friendService) {
     this.partyService = partyService;
+    this.friendService = friendService;
   }
 
   @Override
@@ -228,6 +232,13 @@ public final class PartyCommand implements BasicCommand {
     UUID playerId = requirePlayer(sender);
     if (playerId == null) {
       return;
+    }
+    if (sender instanceof Player player) {
+      var mapGui = MapGui.get();
+      if (mapGui != null) {
+        mapGui.open(player, new SocialScreen(friendService, partyService, SocialTab.PARTY));
+        return;
+      }
     }
     Optional<Party> party = partyService.partyOf(playerId);
     if (party.isEmpty()) {

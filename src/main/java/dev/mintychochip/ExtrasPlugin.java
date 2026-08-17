@@ -39,6 +39,7 @@ import dev.mintychochip.paper.PartyLifecycleListener;
 import dev.mintychochip.paper.RewardsCommand;
 import dev.mintychochip.paper.RewardsConfig;
 import dev.mintychochip.paper.RewardsListener;
+import dev.mintychochip.paper.SocialCommand;
 import dev.mintychochip.paper.TitleCommand;
 import dev.mintychochip.paper.TradeCommand;
 import dev.mintychochip.paper.TradeGui;
@@ -199,7 +200,14 @@ public final class ExtrasPlugin extends JavaPlugin {
                       "party",
                       "Manage persistent player parties.",
                       List.of(),
-                      new PartyCommand(partyService));
+                      new PartyCommand(partyService, friendService));
+              event
+                  .registrar()
+                  .register(
+                      "social",
+                      "Open the MapGUI social menu.",
+                      List.of(),
+                      new SocialCommand(friendService, partyService));
               event
                   .registrar()
                   .register(
@@ -218,7 +226,7 @@ public final class ExtrasPlugin extends JavaPlugin {
                       "friend",
                       "Manage persistent player friendships.",
                       List.of("friends"),
-                      new FriendCommand(friendService));
+                      new FriendCommand(friendService, partyService));
               event
                   .registrar()
                   .register(
