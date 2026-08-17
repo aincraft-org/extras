@@ -1,7 +1,7 @@
 # Parties (modular-extras) — Living Spec
 
 > Status: active
-> Last updated: 2026-08-08
+> Last updated: 2026-08-16
 > Owners: jlo
 
 ## Intent
@@ -56,6 +56,7 @@ grouping).
 - [x] `DefaultPartyService` with cap/leadership/invite invariants
 - [x] `/party` BasicCommand + presence listener + ServicesManager registration
 - [x] Committed-domain events for create/invite/accept/decline/leave/kick/disband/transfer
+- [x] MapGUI "Party" tab in the `/social` menu: create party, in-party member list, invite picker, pending party invites, and leader actions (kick/transfer/disband/leave)
 - [x] Green build: 26 tests, shaded jar
 
 ## Next
@@ -76,6 +77,8 @@ grouping).
 | 2026-08-08 | Persistence uses SQLite (raw JDBC, single connection) | Per user; deterministic and matches sibling modular plugins |
 | 2026-08-08 | Presence hooks live in the paper listener, not the SPI | First-class SPI stays implementation-neutral |
 | 2026-08-08 | Mutations synchronized on one internal lock | Cap/leadership check-then-act must be atomic under concurrency |
+| 2026-08-16 | MapGUI tabbed social menu (Friends/Party/Invites) and player picker | Adds a graphical friends/party list without changing `FriendService` or `PartyService` contracts; `mapgui-api` is `compileOnly` and MapGUI is a required server plugin via `paper-plugin.yml` |
+| 2026-08-16 | Runtime smoke blocked on Paper 1.21.11 | MapGUI 1.1.x only ships the `v26_2` NMS backend and disables on the current `runServer` 1.21.11; a compatible MapGUI release is needed for live testing |
 
 ## Open questions
 

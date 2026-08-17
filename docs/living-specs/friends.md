@@ -1,7 +1,7 @@
 # Friends (modular-extras) — Living Spec
 
 > Status: active
-> Last updated: 2026-08-08
+> Last updated: 2026-08-16
 > Owners: jlo
 
 ## Intent
@@ -62,6 +62,7 @@ and presence announcements to online friends.
 - [x] SQLite repository (`friend_requests`, `friendships`) with transactions
 - [x] `DefaultFriendService` with mutual/canonical invariants
 - [x] `/friend` command (request/add, accept/decline/deny, cancel, remove, list, requests) + presence listener
+- [x] MapGUI "Friends" tab in the `/social` menu: friend list with online/offline presence, pending request accept/decline/cancel, and an add-friend player picker
 - [x] Committed-domain events for request/accept/decline/cancel/removal
 - [x] Green build: 48 tests, shaded jar
 
@@ -82,6 +83,8 @@ and presence announcements to online friends.
 | 2026-08-08 | Separate `friends.db` from `party.db` | Keeps connection isolation; schema independent |
 | 2026-08-08 | Canonical pair stored as `player_a < player_b` | One row per unordered pair; simple uniqueness |
 | 2026-08-08 | Presence announcements in a paper listener, not the SPI | Mirrors party listener convention; SPI stays implementation-neutral |
+| 2026-08-16 | MapGUI tabbed social menu (Friends/Party/Invites) and player picker | Adds a graphical friends/party list without changing `FriendService` or `PartyService` contracts; `mapgui-api` is `compileOnly` and MapGUI is a required server plugin via `paper-plugin.yml` |
+| 2026-08-16 | Runtime smoke blocked on Paper 1.21.11 | MapGUI 1.1.x only ships the `v26_2` NMS backend and disables on the current `runServer` 1.21.11; a compatible MapGUI release is needed for live testing |
 
 ## Open questions
 

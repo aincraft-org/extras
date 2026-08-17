@@ -1,6 +1,14 @@
 package dev.mintychochip.paper;
 
-import static de.flog99.mapgui.ui.Ui.*;
+import static de.flog99.mapgui.ui.Ui.Button;
+import static de.flog99.mapgui.ui.Ui.Column;
+import static de.flog99.mapgui.ui.Ui.Divider;
+import static de.flog99.mapgui.ui.Ui.Field;
+import static de.flog99.mapgui.ui.Ui.Row;
+import static de.flog99.mapgui.ui.Ui.Scroll;
+import static de.flog99.mapgui.ui.Ui.Spacer;
+import static de.flog99.mapgui.ui.Ui.Text;
+import static de.flog99.mapgui.ui.Ui.each;
 
 import de.flog99.mapgui.Click;
 import de.flog99.mapgui.HandOptions;
