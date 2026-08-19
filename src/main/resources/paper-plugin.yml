@@ -3,7 +3,7 @@ version: '${version}'
 main: dev.mintychochip.ExtrasPlugin
 api-version: '1.21'
 folia-supported: true
-description: Persistent parties, friendships, titles, player mailboxes, and item trading, and chat channels.
+description: Persistent parties, friendships, titles, custom advancements, player mailboxes, and item trading, and chat channels.
 author: jlo
 website: https://github.com/aincraft-org/modular-extras
 commands:
@@ -47,6 +47,12 @@ permissions:
   extras.social.use:
     description: Open the MapGUI social menu
     default: true
+  extras.advancements.use:
+    description: List own custom advancements
+    default: true
+  extras.advancements.admin:
+    description: Grant custom advancements to players
+    default: op
 dependencies:
   server:
     MapGUI:

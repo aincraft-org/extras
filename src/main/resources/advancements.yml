@@ -1,0 +1,19 @@
+# Custom advancements catalog. Downstream plugins may also register entries
+# on AdvancementService at runtime. Granting a known id persists completion
+# and shows a Minecraft advancement toast (title, icon, frame).
+advancements:
+  first-login:
+    title: Welcome
+    description: Join the server for the first time
+    icon: minecraft:oak_door
+    frame: task
+  party-maker:
+    title: Let's Party
+    description: Create or join a party
+    icon: minecraft:cake
+    frame: goal
+  extras-legend:
+    title: Extras Legend
+    description: Complete a legendary challenge
+    icon: minecraft:nether_star
+    frame: challenge

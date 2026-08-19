@@ -1,15 +1,19 @@
 package dev.mintychochip;
 
+import dev.mintychochip.api.AdvancementService;
+import dev.mintychochip.api.AdvancementToastSender;
 import dev.mintychochip.api.ChatService;
 import dev.mintychochip.api.FriendService;
 import dev.mintychochip.api.MailService;
 import dev.mintychochip.api.PartyService;
 import dev.mintychochip.api.TitleService;
+import dev.mintychochip.api.events.ExtrasEvent;
 import dev.mintychochip.api.events.ExtrasEventService;
 import dev.mintychochip.api.rewards.DailyRewardService;
 import dev.mintychochip.api.rewards.LeaderboardService;
 import dev.mintychochip.api.rewards.LoginStreakService;
 import dev.mintychochip.core.ChatRouter;
+import dev.mintychochip.core.DefaultAdvancementService;
 import dev.mintychochip.core.DefaultChatService;
 import dev.mintychochip.core.DefaultDailyRewardService;
 import dev.mintychochip.core.DefaultFriendService;
@@ -20,12 +24,16 @@ import dev.mintychochip.core.DefaultPartyService;
 import dev.mintychochip.core.DefaultTitleService;
 import dev.mintychochip.core.DefaultTradeService;
 import dev.mintychochip.core.InProcessExtrasEventService;
+import dev.mintychochip.core.JsonAdvancementRepository;
 import dev.mintychochip.core.JsonTitleRepository;
 import dev.mintychochip.core.SqliteChatRepository;
 import dev.mintychochip.core.SqliteFriendRepository;
 import dev.mintychochip.core.SqliteMailRepository;
 import dev.mintychochip.core.SqlitePartyRepository;
 import dev.mintychochip.core.SqliteRewardStore;
+import dev.mintychochip.paper.AdvancementCommand;
+import dev.mintychochip.paper.AdvancementToastListener;
+import dev.mintychochip.paper.AdvancementsConfig;
 import dev.mintychochip.paper.ChatCommand;
 import dev.mintychochip.paper.ChatListener;
 import dev.mintychochip.paper.ChatPresenceRegistry;
@@ -34,6 +42,7 @@ import dev.mintychochip.paper.FriendCommand;
 import dev.mintychochip.paper.FriendLifecycleListener;
 import dev.mintychochip.paper.MailCommand;
 import dev.mintychochip.paper.MailboxGui;
+import dev.mintychochip.paper.PaperAdvancementToastSender;
 import dev.mintychochip.paper.PartyCommand;
 import dev.mintychochip.paper.PartyLifecycleListener;
 import dev.mintychochip.paper.RewardsCommand;
@@ -59,6 +68,7 @@ public final class ExtrasPlugin extends JavaPlugin {
   private DefaultFriendService friendService;
   private FriendLifecycleListener friendLifecycleListener;
   private DefaultTitleService titleService;
+  private DefaultAdvancementService advancementService;
   private SqliteRewardStore rewardStore;
   private DefaultDailyRewardService dailyRewardService;
   private DefaultLeaderboardService leaderboardService;
@@ -115,6 +125,22 @@ public final class ExtrasPlugin extends JavaPlugin {
             eventService);
     Bukkit.getServicesManager()
         .register(TitleService.class, titleService, this, ServicePriority.Normal);
+
+    AdvancementsConfig advancementsConfig = AdvancementsConfig.load(this);
+    advancementService =
+        new DefaultAdvancementService(
+            new JsonAdvancementRepository(dataDir.resolve("advancements")),
+            advancementsConfig.catalog(),
+            java.time.Clock.systemUTC(),
+            eventService);
+    Bukkit.getServicesManager()
+        .register(AdvancementService.class, advancementService, this, ServicePriority.Normal);
+    PaperAdvancementToastSender toastSender = new PaperAdvancementToastSender(this);
+    Bukkit.getServicesManager()
+        .register(AdvancementToastSender.class, toastSender, this, ServicePriority.Normal);
+    eventService.subscribe(
+        ExtrasEvent.AdvancementGranted.class,
+        new AdvancementToastListener(advancementService, toastSender)::onGranted);
 
     chatRepository = new SqliteChatRepository(dataDir.resolve("chat.db"));
     chatService = new DefaultChatService(chatRepository, java.time.Clock.systemUTC(), eventService);
@@ -237,6 +263,13 @@ public final class ExtrasPlugin extends JavaPlugin {
               event
                   .registrar()
                   .register(
+                      "advancements",
+                      "Grant and list custom advancements.",
+                      List.of("xadvancement"),
+                      new AdvancementCommand(advancementService));
+              event
+                  .registrar()
+                  .register(
                       "mail",
                       "Player mailbox — send, read, and claim mail.",
                       List.of(),
@@ -268,6 +301,8 @@ public final class ExtrasPlugin extends JavaPlugin {
                 + dataDir.resolve("chat.db")
                 + "; titles at "
                 + dataDir.resolve("titles")
+                + "; advancements at "
+                + dataDir.resolve("advancements")
                 + ").");
   }
 
@@ -333,6 +368,7 @@ public final class ExtrasPlugin extends JavaPlugin {
       chatRepository = null;
     }
     titleService = null;
+    advancementService = null;
     tradeService = null;
     mailService = null;
     chatService = null;
@@ -355,6 +391,10 @@ public final class ExtrasPlugin extends JavaPlugin {
 
   public TitleService titleService() {
     return titleService;
+  }
+
+  public AdvancementService advancementService() {
+    return advancementService;
   }
 
   public MailService mailService() {

@@ -28,14 +28,20 @@ class PluginDescriptorTest {
       assertTrue(yaml.contains("api-version: '1.21'"), "api-version should be 1.21");
       assertTrue(
           yaml.contains(
-              "description: Persistent parties, friendships, titles, player mailboxes, and item trading, and chat channels."),
-          "plugin description should mention chat channels");
+              "description: Persistent parties, friendships, titles, custom advancements, player mailboxes, and item trading, and chat channels."),
+          "plugin description should mention custom advancements");
       assertTrue(yaml.contains("extras.chat.use:"), "chat permission should be declared");
       assertTrue(yaml.contains("default: true"), "chat permission should be granted by default");
       assertTrue(yaml.contains("aliases: [ch, c]"), "chat aliases should be declared");
       assertTrue(yaml.contains("extras.rewards.use:"), "rewards use permission should be declared");
       assertTrue(
           yaml.contains("extras.rewards.admin:"), "rewards admin permission should be declared");
+      assertTrue(
+          yaml.contains("extras.advancements.use:"),
+          "advancements use permission should be declared");
+      assertTrue(
+          yaml.contains("extras.advancements.admin:"),
+          "advancements admin permission should be declared");
     }
   }
 
@@ -55,5 +61,30 @@ class PluginDescriptorTest {
     assertTrue(
         java.lang.AutoCloseable.class.isAssignableFrom(subscription),
         "EventSubscription should be AutoCloseable");
+  }
+
+  @Test
+  void pluginHoldsAndRegistersAdvancementService() throws Exception {
+    Class<?> plugin = Class.forName("dev.mintychochip.ExtrasPlugin");
+    plugin.getDeclaredField("advancementService");
+    Class<?> api = Class.forName("dev.mintychochip.api.AdvancementService");
+    assertTrue(api.isInterface(), "AdvancementService should be an SPI interface");
+    Class<?> toastApi = Class.forName("dev.mintychochip.api.AdvancementToastSender");
+    assertTrue(toastApi.isInterface(), "AdvancementToastSender should be the toast API");
+    String source =
+        java.nio.file.Files.readString(
+            java.nio.file.Path.of("src/main/java/dev/mintychochip/ExtrasPlugin.java"));
+    assertTrue(
+        source.contains("register(AdvancementService.class"),
+        "ExtrasPlugin should register AdvancementService on ServicesManager");
+    assertTrue(
+        source.contains("register(AdvancementToastSender.class"),
+        "ExtrasPlugin should register AdvancementToastSender on ServicesManager");
+    assertTrue(
+        source.contains("AdvancementToastListener"),
+        "ExtrasPlugin should wire the grant toast listener");
+    assertTrue(
+        source.contains("new AdvancementCommand(advancementService)"),
+        "ExtrasPlugin should register the advancements command");
   }
 }
