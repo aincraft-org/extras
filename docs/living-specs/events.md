@@ -1,7 +1,7 @@
 # Events (modular-extras) — Living Spec
 
 > Status: active
-> Last updated: 2026-08-12
+> Last updated: 2026-08-19
 > Owners: jlo
 
 ## Intent
@@ -20,7 +20,7 @@ exposes a repository row, Bukkit object, or item content.
   `EventSubscription` handles, and the sealed `ExtrasEvent` record set
 - In-process synchronous bus (`InProcessExtrasEventService`) with per-call
   delivery snapshots, subscriber failure isolation, and close semantics
-- Emission from friend, party, title, mail, chat-preference, trade, and
+- Emission from friend, party, title, advancement, mail, chat-preference, trade, and
   rewards/streak domains after successful persistence, outside mutation locks
 - Per-row event fan-out for bulk `deleteAllRead`
 
@@ -70,6 +70,7 @@ exposes a repository row, Bukkit object, or item content.
 - [x] Friend events (5 records) + tests
 - [x] Party events (8 records, incl. logout auto-transfer) + tests
 - [x] Title events (4 records, actual-change-only) + tests
+- [x] Advancement granted event (first persist only) + tests
 - [x] Mail events (5 records, changed-row/id reporting) + tests
 - [x] Chat preference events (3 records) + tests
 - [x] Trade lifecycle events (5 records) + tests
