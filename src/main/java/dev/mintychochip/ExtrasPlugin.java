@@ -6,6 +6,7 @@ import dev.mintychochip.api.FriendService;
 import dev.mintychochip.api.MailService;
 import dev.mintychochip.api.PartyService;
 import dev.mintychochip.api.TitleService;
+import dev.mintychochip.api.cinematic.CinematicService;
 import dev.mintychochip.api.events.ExtrasEvent;
 import dev.mintychochip.api.events.ExtrasEventService;
 import dev.mintychochip.api.rewards.DailyRewardService;
@@ -15,6 +16,7 @@ import dev.mintychochip.api.toast.ToastService;
 import dev.mintychochip.core.ChatRouter;
 import dev.mintychochip.core.DefaultAdvancementService;
 import dev.mintychochip.core.DefaultChatService;
+import dev.mintychochip.core.DefaultCinematicService;
 import dev.mintychochip.core.DefaultDailyRewardService;
 import dev.mintychochip.core.DefaultFriendService;
 import dev.mintychochip.core.DefaultLeaderboardService;
@@ -25,6 +27,7 @@ import dev.mintychochip.core.DefaultTitleService;
 import dev.mintychochip.core.DefaultTradeService;
 import dev.mintychochip.core.InProcessExtrasEventService;
 import dev.mintychochip.core.JsonAdvancementRepository;
+import dev.mintychochip.core.JsonCinematicRepository;
 import dev.mintychochip.core.JsonTitleRepository;
 import dev.mintychochip.core.SqliteChatRepository;
 import dev.mintychochip.core.SqliteFriendRepository;
@@ -37,11 +40,13 @@ import dev.mintychochip.paper.AdvancementsConfig;
 import dev.mintychochip.paper.ChatCommand;
 import dev.mintychochip.paper.ChatListener;
 import dev.mintychochip.paper.ChatPresenceRegistry;
+import dev.mintychochip.paper.CinematicCommand;
 import dev.mintychochip.paper.ComposeGui;
 import dev.mintychochip.paper.FriendCommand;
 import dev.mintychochip.paper.FriendLifecycleListener;
 import dev.mintychochip.paper.MailCommand;
 import dev.mintychochip.paper.MailboxGui;
+import dev.mintychochip.paper.PaperCinematicController;
 import dev.mintychochip.paper.PaperToastSender;
 import dev.mintychochip.paper.PartyCommand;
 import dev.mintychochip.paper.PartyLifecycleListener;
@@ -85,6 +90,8 @@ public final class ExtrasPlugin extends JavaPlugin {
   private InProcessExtrasEventService eventService;
   private org.bukkit.event.Listener composeListener;
   private org.bukkit.event.Listener tradeGuiListener;
+  private DefaultCinematicService cinematicService;
+  private PaperCinematicController cinematicController;
 
   @Override
   public void onEnable() {
@@ -216,6 +223,13 @@ public final class ExtrasPlugin extends JavaPlugin {
     tradeGuiListener = TradeGui.listener(tradeService);
     Bukkit.getPluginManager().registerEvents(tradeGuiListener, this);
 
+    cinematicService =
+        new DefaultCinematicService(new JsonCinematicRepository(dataDir.resolve("cinematics")));
+    Bukkit.getServicesManager()
+        .register(CinematicService.class, cinematicService, this, ServicePriority.Normal);
+    cinematicController = new PaperCinematicController(this, cinematicService);
+    Bukkit.getPluginManager().registerEvents(cinematicController, this);
+
     getLifecycleManager()
         .registerEventHandler(
             LifecycleEvents.COMMANDS,
@@ -288,6 +302,13 @@ public final class ExtrasPlugin extends JavaPlugin {
                       "Manage chat channels and preferences.",
                       List.of("ch", "c"),
                       new ChatCommand(chatService, chatListener::sendOnce));
+              event
+                  .registrar()
+                  .register(
+                      "cinematic",
+                      "Create cinematic camera scenes with shaders and props.",
+                      List.of("cinematics", "cine"),
+                      new CinematicCommand(cinematicService, cinematicController));
             });
     getLogger()
         .info(
@@ -303,6 +324,8 @@ public final class ExtrasPlugin extends JavaPlugin {
                 + dataDir.resolve("titles")
                 + "; advancements at "
                 + dataDir.resolve("advancements")
+                + "; cinematics at "
+                + dataDir.resolve("cinematics")
                 + ").");
   }
 
@@ -373,6 +396,15 @@ public final class ExtrasPlugin extends JavaPlugin {
     mailService = null;
     chatService = null;
     chatPresenceRegistry = null;
+    if (cinematicController != null) {
+      HandlerList.unregisterAll(cinematicController);
+      cinematicController.close();
+      cinematicController = null;
+    }
+    if (cinematicService != null) {
+      cinematicService.close();
+      cinematicService = null;
+    }
     if (eventService != null) {
       eventService.close();
       eventService = null;
