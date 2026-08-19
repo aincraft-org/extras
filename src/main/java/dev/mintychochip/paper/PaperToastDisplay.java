@@ -1,7 +1,7 @@
 package dev.mintychochip.paper;
 
-import dev.mintychochip.api.AdvancementFrame;
-import dev.mintychochip.api.AdvancementToastRequest;
+import dev.mintychochip.api.toast.ToastFrame;
+import dev.mintychochip.api.toast.ToastRequest;
 import io.papermc.paper.advancement.AdvancementDisplay;
 import java.util.Locale;
 import java.util.Objects;
@@ -10,13 +10,13 @@ import java.util.UUID;
 /**
  * Paper toast payload: AdvancementDisplay frame types plus {@code show_toast}.
  *
- * <p>{@link #from(AdvancementToastRequest)} is the shipped mapper the adapter sends. Tests assert
- * this record, not a reimplementation.
+ * <p>{@link #from(ToastRequest)} is the shipped mapper the adapter sends. Tests assert this record,
+ * not a reimplementation.
  */
-public record PaperAdvancementToastDisplay(
+public record PaperToastDisplay(
     UUID playerId, String title, String icon, AdvancementDisplay.Frame frame, boolean showToast) {
 
-  public PaperAdvancementToastDisplay {
+  public PaperToastDisplay {
     Objects.requireNonNull(playerId, "playerId");
     Objects.requireNonNull(title, "title");
     Objects.requireNonNull(icon, "icon");
@@ -24,13 +24,13 @@ public record PaperAdvancementToastDisplay(
   }
 
   /** Maps a Bukkit-free toast request onto Paper's advancement-display / toast path. */
-  public static PaperAdvancementToastDisplay from(AdvancementToastRequest request) {
+  public static PaperToastDisplay from(ToastRequest request) {
     Objects.requireNonNull(request, "request");
-    return new PaperAdvancementToastDisplay(
+    return new PaperToastDisplay(
         request.playerId(), request.title(), request.icon(), toPaperFrame(request.frame()), true);
   }
 
-  static AdvancementDisplay.Frame toPaperFrame(AdvancementFrame frame) {
+  static AdvancementDisplay.Frame toPaperFrame(ToastFrame frame) {
     return switch (frame) {
       case TASK -> AdvancementDisplay.Frame.TASK;
       case GOAL -> AdvancementDisplay.Frame.GOAL;
@@ -39,8 +39,8 @@ public record PaperAdvancementToastDisplay(
   }
 
   /**
-   * Temporary advancement JSON used by {@link PaperAdvancementToastSender}. {@code show_toast} is
-   * true; chat announce is off so the toast is not substituted by a chat line.
+   * Temporary advancement JSON used by {@link PaperToastSender}. {@code show_toast} is true; chat
+   * announce is off so the toast is not substituted by a chat line.
    */
   public String advancementJson() {
     String frameName = frame.name().toLowerCase(Locale.ROOT);

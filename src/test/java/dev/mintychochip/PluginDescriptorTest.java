@@ -69,8 +69,8 @@ class PluginDescriptorTest {
     plugin.getDeclaredField("advancementService");
     Class<?> api = Class.forName("dev.mintychochip.api.AdvancementService");
     assertTrue(api.isInterface(), "AdvancementService should be an SPI interface");
-    Class<?> toastApi = Class.forName("dev.mintychochip.api.AdvancementToastSender");
-    assertTrue(toastApi.isInterface(), "AdvancementToastSender should be the toast API");
+    Class<?> toastApi = Class.forName("dev.mintychochip.api.toast.ToastService");
+    assertTrue(toastApi.isInterface(), "ToastService should be the standalone toast SPI");
     String source =
         java.nio.file.Files.readString(
             java.nio.file.Path.of("src/main/java/dev/mintychochip/ExtrasPlugin.java"));
@@ -78,8 +78,8 @@ class PluginDescriptorTest {
         source.contains("register(AdvancementService.class"),
         "ExtrasPlugin should register AdvancementService on ServicesManager");
     assertTrue(
-        source.contains("register(AdvancementToastSender.class"),
-        "ExtrasPlugin should register AdvancementToastSender on ServicesManager");
+        source.contains("register(ToastService.class"),
+        "ExtrasPlugin should register ToastService on ServicesManager");
     assertTrue(
         source.contains("AdvancementToastListener"),
         "ExtrasPlugin should wire the grant toast listener");

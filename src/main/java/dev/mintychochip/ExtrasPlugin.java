@@ -1,7 +1,6 @@
 package dev.mintychochip;
 
 import dev.mintychochip.api.AdvancementService;
-import dev.mintychochip.api.AdvancementToastSender;
 import dev.mintychochip.api.ChatService;
 import dev.mintychochip.api.FriendService;
 import dev.mintychochip.api.MailService;
@@ -12,6 +11,7 @@ import dev.mintychochip.api.events.ExtrasEventService;
 import dev.mintychochip.api.rewards.DailyRewardService;
 import dev.mintychochip.api.rewards.LeaderboardService;
 import dev.mintychochip.api.rewards.LoginStreakService;
+import dev.mintychochip.api.toast.ToastService;
 import dev.mintychochip.core.ChatRouter;
 import dev.mintychochip.core.DefaultAdvancementService;
 import dev.mintychochip.core.DefaultChatService;
@@ -42,7 +42,7 @@ import dev.mintychochip.paper.FriendCommand;
 import dev.mintychochip.paper.FriendLifecycleListener;
 import dev.mintychochip.paper.MailCommand;
 import dev.mintychochip.paper.MailboxGui;
-import dev.mintychochip.paper.PaperAdvancementToastSender;
+import dev.mintychochip.paper.PaperToastSender;
 import dev.mintychochip.paper.PartyCommand;
 import dev.mintychochip.paper.PartyLifecycleListener;
 import dev.mintychochip.paper.RewardsCommand;
@@ -135,12 +135,12 @@ public final class ExtrasPlugin extends JavaPlugin {
             eventService);
     Bukkit.getServicesManager()
         .register(AdvancementService.class, advancementService, this, ServicePriority.Normal);
-    PaperAdvancementToastSender toastSender = new PaperAdvancementToastSender(this);
+    ToastService toastService = new PaperToastSender(this);
     Bukkit.getServicesManager()
-        .register(AdvancementToastSender.class, toastSender, this, ServicePriority.Normal);
+        .register(ToastService.class, toastService, this, ServicePriority.Normal);
     eventService.subscribe(
         ExtrasEvent.AdvancementGranted.class,
-        new AdvancementToastListener(advancementService, toastSender)::onGranted);
+        new AdvancementToastListener(advancementService, toastService)::onGranted);
 
     chatRepository = new SqliteChatRepository(dataDir.resolve("chat.db"));
     chatService = new DefaultChatService(chatRepository, java.time.Clock.systemUTC(), eventService);

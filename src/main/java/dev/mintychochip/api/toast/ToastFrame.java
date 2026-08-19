@@ -1,15 +1,13 @@
-package dev.mintychochip.api;
+package dev.mintychochip.api.toast;
 
 import java.util.Locale;
 import java.util.Objects;
 
 /**
- * Minecraft advancement frame used by custom advancement displays.
- *
- * <p>Values match the vanilla / Paper display vocabulary: {@code task}, {@code goal}, {@code
- * challenge}.
+ * Minecraft toast frame. Matches the vanilla / Paper advancement-display vocabulary: {@code task},
+ * {@code goal}, {@code challenge}.
  */
-public enum AdvancementFrame {
+public enum ToastFrame {
   TASK,
   GOAL,
   CHALLENGE;
@@ -18,7 +16,7 @@ public enum AdvancementFrame {
    * Parses a frame name ({@code task}, {@code goal}, {@code challenge}), ignoring case and
    * surrounding whitespace.
    */
-  public static AdvancementFrame parse(String value) {
+  public static ToastFrame parse(String value) {
     Objects.requireNonNull(value, "value");
     String normalized = value.trim().toUpperCase(Locale.ROOT);
     try {

@@ -1,18 +1,18 @@
 package dev.mintychochip.paper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.mintychochip.api.AdvancementFrame;
 import dev.mintychochip.api.AdvancementResult;
-import dev.mintychochip.api.AdvancementToastRequest;
 import dev.mintychochip.api.CustomAdvancement;
 import dev.mintychochip.api.events.ExtrasEvent;
 import dev.mintychochip.api.rewards.MaterialKey;
+import dev.mintychochip.api.toast.ToastFrame;
+import dev.mintychochip.api.toast.ToastRequest;
+import dev.mintychochip.api.toast.ToastService;
 import dev.mintychochip.core.DefaultAdvancementService;
 import dev.mintychochip.core.InProcessExtrasEventService;
 import dev.mintychochip.core.JsonAdvancementRepository;
-import io.papermc.paper.advancement.AdvancementDisplay;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -23,8 +23,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Drives the shipped Paper toast path: first-time grant → listener → {@link
- * PaperAdvancementToastSender} → {@link PaperAdvancementToastDisplay}.
+ * Drives first-time grant → {@link AdvancementToastListener} → {@link ToastService}.
+ *
+ * <p>The Paper packet path is covered by {@link PaperToastTest}; this test asserts advancements
+ * consume the standalone toast SPI.
  */
 class AdvancementToastTest {
 
@@ -32,7 +34,7 @@ class AdvancementToastTest {
 
   private InProcessExtrasEventService bus;
   private DefaultAdvancementService service;
-  private final List<PaperAdvancementToastDisplay> sent = new ArrayList<>();
+  private final List<ToastRequest> sent = new ArrayList<>();
 
   private static final CustomAdvancement SHINY =
       new CustomAdvancement(
@@ -65,24 +67,22 @@ class AdvancementToastTest {
             List.of(SHINY, PARTY, LEGEND),
             Clock.systemUTC(),
             bus);
-    PaperAdvancementToastSender sender = new PaperAdvancementToastSender(sent::add);
-    AdvancementToastListener listener = new AdvancementToastListener(service, sender);
+    ToastService toasts = sent::add;
+    AdvancementToastListener listener = new AdvancementToastListener(service, toasts);
     bus.subscribe(ExtrasEvent.AdvancementGranted.class, listener::onGranted);
   }
 
   @Test
-  void firstTimeGrantRequestsToastMatchingCatalogDisplay() {
+  void firstTimeGrantSendsToastMatchingCatalogDisplay() {
     UUID playerId = UUID.randomUUID();
 
     assertEquals(AdvancementResult.GRANTED, service.grant(playerId, "first-diamond"));
     assertEquals(1, sent.size());
-    PaperAdvancementToastDisplay toast = sent.get(0);
+    ToastRequest toast = sent.get(0);
     assertEquals(playerId, toast.playerId());
     assertEquals("Shiny!", toast.title());
     assertEquals("minecraft:diamond", toast.icon());
-    assertEquals(AdvancementDisplay.Frame.TASK, toast.frame());
-    assertTrue(toast.showToast());
-    assertTrue(toast.advancementJson().contains("\"show_toast\": true"));
+    assertEquals(ToastFrame.TASK, toast.frame());
   }
 
   @Test
@@ -95,23 +95,18 @@ class AdvancementToastTest {
   }
 
   @Test
-  void framesMapToPaperAdvancementDisplayFrames() {
+  void framesMapOntoToastSpiFrames() {
     UUID playerId = UUID.randomUUID();
 
+    assertEquals(ToastFrame.TASK, AdvancementToastListener.toastFrame(AdvancementFrame.TASK));
+    assertEquals(ToastFrame.GOAL, AdvancementToastListener.toastFrame(AdvancementFrame.GOAL));
     assertEquals(
-        AdvancementDisplay.Frame.TASK,
-        PaperAdvancementToastDisplay.from(AdvancementToastRequest.from(playerId, SHINY)).frame());
-    assertEquals(
-        AdvancementDisplay.Frame.GOAL,
-        PaperAdvancementToastDisplay.from(AdvancementToastRequest.from(playerId, PARTY)).frame());
-    assertEquals(
-        AdvancementDisplay.Frame.CHALLENGE,
-        PaperAdvancementToastDisplay.from(AdvancementToastRequest.from(playerId, LEGEND)).frame());
+        ToastFrame.CHALLENGE, AdvancementToastListener.toastFrame(AdvancementFrame.CHALLENGE));
 
     service.grant(playerId, "party-maker");
     service.grant(playerId, "extras-legend");
-    assertEquals(AdvancementDisplay.Frame.GOAL, sent.get(0).frame());
-    assertEquals(AdvancementDisplay.Frame.CHALLENGE, sent.get(1).frame());
+    assertEquals(ToastFrame.GOAL, sent.get(0).frame());
+    assertEquals(ToastFrame.CHALLENGE, sent.get(1).frame());
     assertEquals("minecraft:cake", sent.get(0).icon());
     assertEquals("Let's Party", sent.get(0).title());
     assertEquals("minecraft:nether_star", sent.get(1).icon());
