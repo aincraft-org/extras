@@ -77,17 +77,30 @@ those overlays and props.
 - [x] Play/stop session restores pre-play pose and clears cues
 - [x] Paper adapter + `/cinematic` camera / shaders / props / play / stop
 - [x] JUnit coverage and plugin descriptor permissions
+- [x] Per-viewer display props (`visibleByDefault=false`, shown only to the watching player)
+
+### Current notes
+Authoring is add-only (create, append keyframe/cue, list, play/stop). There is no remove/replace, preview, skip, freeze, or text/sound track yet. Players can still walk and see their own body during play.
 
 ## Next
 
-- [ ] Per-viewer display props (hide from other players by default)
-- [ ] Optional spectator freeze while a scene is playing
+- [ ] Freeze the watching player during play (cancel move/look, optional hide self)
+- [ ] Scene authoring edits: info, remove/replace keyframe, delete scene, operator preview
+- [ ] Player skip (sneak or `/cinematic skip`) that still restores pose and clears cues
 
 ## Future
 
-- [ ] Bezier / Catmull-Rom camera paths
-- [ ] Screen shake, FOV zoom, camera roll
-- [ ] NPC actors and timestamped command events
+- [ ] Timed titles / subtitles / action bar (dialogue without NPCs)
+- [ ] Timed sound cues (vanilla sound keys)
+- [ ] Fade bookends (darkness/blindness in/out at start and end)
+- [ ] Play for multiple players (`@a`, nearby, or a named list)
+- [ ] Ease-in-out per segment; later Catmull-Rom / Bezier paths
+- [ ] Hold-at-keyframe / wait; optional land at last pose instead of restore
+- [ ] Operator path preview (particles along the camera polyline)
+- [ ] Downstream trigger: other plugins / region enter / first join call `play`
+- [ ] Mannequin / player-display actors
+- [ ] Allowlisted timestamped commands
+- [ ] Screen shake, FOV zoom, camera roll (poor vanilla fit; keep deferred)
 
 ## Decisions log
 
@@ -97,7 +110,9 @@ those overlays and props.
 | 2026-08-19 | Shader overlays are vanilla post/core effect ids, not client packs | Vanilla clients must work |
 | 2026-08-19 | Second play for a player is rejected, not stacked | Restores stay unambiguous; operator stops first |
 | 2026-08-19 | Duration is the last keyframe time; cues outside that window never play | `sample(duration)` matching the last keyframe stays well-defined |
+| 2026-08-19 | Park titles/sounds/fades/multi-play/easing as Future; Next is freeze, authoring edits, skip | Makes a cutscene watchable and editable before adding a second media track |
 
 ## Open questions
 
 - [x] Inclusive cue windows? Yes: `start <= t <= end`.
+- [ ] Which Next slice to build first: freeze, authoring edits, or skip?
