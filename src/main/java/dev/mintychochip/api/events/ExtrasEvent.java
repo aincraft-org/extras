@@ -201,6 +201,18 @@ public interface ExtrasEvent {
     }
   }
 
+  // ---------------------------------------------------------- advancements
+
+  /** {@code playerId} completed custom advancement {@code advancementId} for the first time. */
+  record AdvancementGranted(UUID eventId, Instant occurredAt, UUID playerId, String advancementId)
+      implements ExtrasEvent {
+
+    public AdvancementGranted {
+      requireIds(eventId, occurredAt, playerId);
+      Objects.requireNonNull(advancementId, "advancementId");
+    }
+  }
+
   // ------------------------------------------------------------------ mail
 
   /** Mail {@code mailId} was sent from {@code senderId} to {@code recipientId}. */
