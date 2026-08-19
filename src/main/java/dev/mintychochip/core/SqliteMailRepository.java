@@ -1,12 +1,12 @@
 package dev.mintychochip.core;
 
+import com.zaxxer.hikari.HikariDataSource;
 import dev.mintychochip.api.MailMessage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -21,24 +21,9 @@ import java.util.UUID;
  * SQLite-backed {@link MailRepository}: one {@code mail} table in a single database file.
  * Synchronous, single-writer (SQLite serializes writes).
  */
-public final class SqliteMailRepository implements MailRepository {
+public final class SqliteMailRepository implements MailRepository, AutoCloseable {
 
-  private static final String CREATE_SCHEMA =
-      """
-            CREATE TABLE IF NOT EXISTS mail (
-              id          INTEGER PRIMARY KEY AUTOINCREMENT,
-              recipient   TEXT    NOT NULL,
-              sender_name TEXT    NOT NULL,
-              body        TEXT    NOT NULL,
-              sent_at     INTEGER NOT NULL,
-              read        INTEGER NOT NULL DEFAULT 0,
-              claimed     INTEGER NOT NULL DEFAULT 0,
-              attachment  TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_mail_recipient_id ON mail(recipient, id);
-            CREATE INDEX IF NOT EXISTS idx_mail_recipient_read ON mail(recipient, read);
-            """;
-
+  private final HikariDataSource dataSource;
   private final Connection connection;
 
   public SqliteMailRepository(Path dbFile) {
@@ -48,9 +33,15 @@ public final class SqliteMailRepository implements MailRepository {
       if (parent != null) {
         Files.createDirectories(parent);
       }
-      this.connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.toAbsolutePath());
+      this.dataSource = SqlitePool.open("jdbc:sqlite:" + dbFile.toAbsolutePath());
+      this.connection = dataSource.getConnection();
       try (Statement statement = connection.createStatement()) {
-        statement.execute(CREATE_SCHEMA);
+        for (String ddl : SqlStatements.load("mail/create-schema.sql").split(";")) {
+          String trimmed = ddl.trim();
+          if (!trimmed.isEmpty()) {
+            statement.execute(trimmed);
+          }
+        }
       }
     } catch (SQLException e) {
       throw new UncheckedIOException("Failed to open mail database " + dbFile, new IOException(e));
@@ -59,13 +50,13 @@ public final class SqliteMailRepository implements MailRepository {
     }
   }
 
+  HikariDataSource dataSource() {
+    return dataSource;
+  }
+
   @Override
   public synchronized MailMessage insert(MailMessage mail) {
-    String sql =
-        """
-                INSERT INTO mail (recipient, sender_name, body, sent_at, read, claimed, attachment)
-                VALUES (?, ?, ?, ?, ?, 0, ?)
-                """;
+    String sql = SqlStatements.load("mail/insert.sql");
     try (PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
       ps.setString(1, mail.recipient().toString());
       ps.setString(2, mail.senderName());
@@ -94,14 +85,7 @@ public final class SqliteMailRepository implements MailRepository {
 
   @Override
   public synchronized List<MailMessage> list(UUID recipient, int page, int pageSize) {
-    String sql =
-        """
-                SELECT id, recipient, sender_name, body, sent_at, read, attachment
-                FROM mail
-                WHERE recipient = ?
-                ORDER BY sent_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                """;
+    String sql = SqlStatements.load("mail/list.sql");
     try (PreparedStatement ps = connection.prepareStatement(sql)) {
       ps.setString(1, recipient.toString());
       ps.setInt(2, pageSize);
@@ -120,24 +104,22 @@ public final class SqliteMailRepository implements MailRepository {
 
   @Override
   public synchronized int count(UUID recipient) {
-    return scalarInt("SELECT COUNT(*) FROM mail WHERE recipient = ?", recipient);
+    return scalarInt(SqlStatements.load("mail/count.sql"), recipient);
   }
 
   @Override
   public synchronized int unreadCount(UUID recipient) {
-    return scalarInt("SELECT COUNT(*) FROM mail WHERE recipient = ? AND read = 0", recipient);
+    return scalarInt(SqlStatements.load("mail/unread-count.sql"), recipient);
   }
 
   @Override
   public synchronized boolean markRead(UUID recipient, long mailId) {
-    return updateChanged(
-        "UPDATE mail SET read = 1 WHERE recipient = ? AND id = ? AND read = 0", recipient, mailId);
+    return updateChanged(SqlStatements.load("mail/mark-read.sql"), recipient, mailId);
   }
 
   @Override
   public synchronized boolean markUnread(UUID recipient, long mailId) {
-    return updateChanged(
-        "UPDATE mail SET read = 0 WHERE recipient = ? AND id = ? AND read = 1", recipient, mailId);
+    return updateChanged(SqlStatements.load("mail/mark-unread.sql"), recipient, mailId);
   }
 
   @Override
@@ -145,8 +127,7 @@ public final class SqliteMailRepository implements MailRepository {
     try {
       connection.setAutoCommit(false);
       try (PreparedStatement select =
-          connection.prepareStatement(
-              "SELECT attachment FROM mail WHERE recipient = ? AND id = ? AND claimed = 0")) {
+          connection.prepareStatement(SqlStatements.load("mail/select-unclaimed-attachment.sql"))) {
         select.setString(1, recipient.toString());
         select.setLong(2, mailId);
         try (ResultSet rs = select.executeQuery()) {
@@ -155,8 +136,7 @@ public final class SqliteMailRepository implements MailRepository {
           }
           String blob = rs.getString(1);
           try (PreparedStatement update =
-              connection.prepareStatement(
-                  "UPDATE mail SET claimed = 1 WHERE recipient = ? AND id = ? AND claimed = 0")) {
+              connection.prepareStatement(SqlStatements.load("mail/mark-claimed.sql"))) {
             update.setString(1, recipient.toString());
             update.setLong(2, mailId);
             int updated = update.executeUpdate();
@@ -179,7 +159,7 @@ public final class SqliteMailRepository implements MailRepository {
   @Override
   public synchronized boolean delete(UUID recipient, long mailId) {
     try (PreparedStatement ps =
-        connection.prepareStatement("DELETE FROM mail WHERE recipient = ? AND id = ?")) {
+        connection.prepareStatement(SqlStatements.load("mail/delete.sql"))) {
       ps.setString(1, recipient.toString());
       ps.setLong(2, mailId);
       return ps.executeUpdate() > 0;
@@ -194,13 +174,12 @@ public final class SqliteMailRepository implements MailRepository {
     // messages are bulk-deleted. A read letter whose item is not yet
     // claimed must survive so the player can still claim it. The deleted
     // ids are captured inside the same transaction that deletes them.
-    String where = "recipient = ? AND read = 1 AND (attachment IS NULL OR claimed = 1)";
     try {
       connection.setAutoCommit(false);
       List<Long> deletedIds = new ArrayList<>();
       try {
         try (PreparedStatement select =
-            connection.prepareStatement("SELECT id FROM mail WHERE " + where)) {
+            connection.prepareStatement(SqlStatements.load("mail/select-ids-all-read.sql"))) {
           select.setString(1, recipient.toString());
           try (ResultSet rs = select.executeQuery()) {
             while (rs.next()) {
@@ -209,7 +188,7 @@ public final class SqliteMailRepository implements MailRepository {
           }
         }
         try (PreparedStatement ps =
-            connection.prepareStatement("DELETE FROM mail WHERE " + where)) {
+            connection.prepareStatement(SqlStatements.load("mail/delete-all-read.sql"))) {
           ps.setString(1, recipient.toString());
           ps.executeUpdate();
         }
@@ -239,6 +218,7 @@ public final class SqliteMailRepository implements MailRepository {
     } catch (SQLException e) {
       throw new UncheckedIOException("Failed to close mail database", new IOException(e));
     }
+    dataSource.close();
   }
 
   private static MailMessage mapRow(ResultSet rs) throws SQLException {

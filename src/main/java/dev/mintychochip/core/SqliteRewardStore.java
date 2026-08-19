@@ -29,47 +29,10 @@ import java.util.UUID;
 public final class SqliteRewardStore implements AutoCloseable {
 
   private static final String[] SCHEMA = {
-    """
-    CREATE TABLE IF NOT EXISTS daily_criteria (
-      day TEXT PRIMARY KEY,
-      criterion_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      key_value TEXT,
-      target INTEGER NOT NULL,
-      description TEXT NOT NULL,
-      reward_type TEXT NOT NULL,
-      reward_payload TEXT NOT NULL,
-      reward_amount INTEGER NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS daily_progress (
-      player_id BLOB NOT NULL,
-      day TEXT NOT NULL,
-      criterion_id TEXT NOT NULL,
-      amount INTEGER NOT NULL,
-      claimed INTEGER NOT NULL,
-      PRIMARY KEY (player_id, day, criterion_id)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS streaks (
-      player_id BLOB PRIMARY KEY,
-      current_streak INTEGER NOT NULL,
-      best_streak INTEGER NOT NULL,
-      last_login_date TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS leaderboard_totals (
-      player_id BLOB NOT NULL,
-      period TEXT NOT NULL,
-      window_key TEXT NOT NULL,
-      total INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (player_id, period, window_key)
-    )
-    """
+    SqlStatements.load("reward/create-daily-criteria.sql"),
+    SqlStatements.load("reward/create-daily-progress.sql"),
+    SqlStatements.load("reward/create-streaks.sql"),
+    SqlStatements.load("reward/create-leaderboard-totals.sql")
   };
 
   private final SqliteConnection sqlite;
@@ -85,7 +48,7 @@ public final class SqliteRewardStore implements AutoCloseable {
 
   Optional<CriterionSnapshot> findCriterion(String day) {
     try (PreparedStatement statement =
-        connection().prepareStatement("SELECT * FROM daily_criteria WHERE day = ?")) {
+        connection().prepareStatement(SqlStatements.load("reward/select-criterion.sql"))) {
       statement.setString(1, day);
       try (ResultSet result = statement.executeQuery()) {
         return result.next() ? Optional.of(mapCriterion(result)) : Optional.empty();
@@ -101,10 +64,7 @@ public final class SqliteRewardStore implements AutoCloseable {
     inTransaction(
         connection -> {
           try (PreparedStatement statement =
-              connection.prepareStatement(
-                  "INSERT OR REPLACE INTO daily_criteria "
-                      + "(day, criterion_id, kind, key_value, target, description, reward_type, "
-                      + "reward_payload, reward_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+              connection.prepareStatement(SqlStatements.load("reward/upsert-criterion.sql"))) {
             statement.setString(1, snapshot.day().toString());
             statement.setString(2, criterion.id());
             statement.setString(3, criterion.kind().name());
@@ -122,10 +82,7 @@ public final class SqliteRewardStore implements AutoCloseable {
 
   ProgressRow findProgress(UUID playerId, String day, String criterionId) {
     try (PreparedStatement statement =
-        connection()
-            .prepareStatement(
-                "SELECT amount, claimed FROM daily_progress "
-                    + "WHERE player_id = ? AND day = ? AND criterion_id = ?")) {
+        connection().prepareStatement(SqlStatements.load("reward/select-progress.sql"))) {
       statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
       statement.setString(2, day);
       statement.setString(3, criterionId);
@@ -144,9 +101,7 @@ public final class SqliteRewardStore implements AutoCloseable {
     inTransaction(
         connection -> {
           try (PreparedStatement statement =
-              connection.prepareStatement(
-                  "INSERT OR REPLACE INTO daily_progress "
-                      + "(player_id, day, criterion_id, amount, claimed) VALUES (?, ?, ?, ?, ?)")) {
+              connection.prepareStatement(SqlStatements.load("reward/upsert-progress.sql"))) {
             statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
             statement.setString(2, day);
             statement.setString(3, criterionId);
@@ -161,10 +116,7 @@ public final class SqliteRewardStore implements AutoCloseable {
   List<LeaderboardRow> leaderboard(String period, String windowKey, int limit) {
     List<LeaderboardRow> rows = new ArrayList<>();
     try (PreparedStatement statement =
-        connection()
-            .prepareStatement(
-                "SELECT player_id, total, updated_at FROM leaderboard_totals "
-                    + "WHERE period = ? AND window_key = ? ORDER BY total DESC, updated_at ASC, player_id LIMIT ?")) {
+        connection().prepareStatement(SqlStatements.load("reward/select-leaderboard.sql"))) {
       statement.setString(1, period);
       statement.setString(2, windowKey);
       statement.setInt(3, limit);
@@ -187,10 +139,7 @@ public final class SqliteRewardStore implements AutoCloseable {
     inTransaction(
         connection -> {
           try (PreparedStatement statement =
-              connection.prepareStatement(
-                  "INSERT INTO leaderboard_totals (player_id, period, window_key, total, updated_at) "
-                      + "VALUES (?, ?, ?, ?, ?) ON CONFLICT(player_id, period, window_key) DO UPDATE SET "
-                      + "total = total + excluded.total, updated_at = excluded.updated_at")) {
+              connection.prepareStatement(SqlStatements.load("reward/add-leaderboard.sql"))) {
             statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
             statement.setString(2, period);
             statement.setString(3, windowKey);
@@ -204,9 +153,7 @@ public final class SqliteRewardStore implements AutoCloseable {
 
   Optional<StreakRow> findStreak(UUID playerId) {
     try (PreparedStatement statement =
-        connection()
-            .prepareStatement(
-                "SELECT current_streak, best_streak, last_login_date FROM streaks WHERE player_id = ?")) {
+        connection().prepareStatement(SqlStatements.load("reward/select-streak.sql"))) {
       statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
       try (ResultSet result = statement.executeQuery()) {
         if (!result.next()) {
@@ -227,9 +174,7 @@ public final class SqliteRewardStore implements AutoCloseable {
     inTransaction(
         connection -> {
           try (PreparedStatement statement =
-              connection.prepareStatement(
-                  "INSERT OR REPLACE INTO streaks "
-                      + "(player_id, current_streak, best_streak, last_login_date) VALUES (?, ?, ?, ?)")) {
+              connection.prepareStatement(SqlStatements.load("reward/upsert-streak.sql"))) {
             statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
             statement.setInt(2, current);
             statement.setInt(3, best);

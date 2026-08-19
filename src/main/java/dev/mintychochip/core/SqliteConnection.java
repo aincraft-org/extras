@@ -1,8 +1,8 @@
 package dev.mintychochip.core;
 
+import com.zaxxer.hikari.HikariDataSource;
 import java.nio.ByteBuffer;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.UUID;
 
@@ -17,33 +17,12 @@ import java.util.UUID;
 final class SqliteConnection implements AutoCloseable {
 
   private static final String[] SCHEMA = {
-    """
-            CREATE TABLE IF NOT EXISTS parties (
-              party_id   BLOB PRIMARY KEY,
-              name       TEXT,
-              leader     BLOB NOT NULL,
-              created_at INTEGER NOT NULL
-            )
-            """,
-    """
-            CREATE TABLE IF NOT EXISTS party_members (
-              party_id  BLOB NOT NULL REFERENCES parties(party_id) ON DELETE CASCADE,
-              member    BLOB NOT NULL,
-              joined_at INTEGER NOT NULL,
-              PRIMARY KEY (party_id, member)
-            )
-            """,
-    """
-            CREATE TABLE IF NOT EXISTS party_invites (
-              party_id   BLOB NOT NULL REFERENCES parties(party_id) ON DELETE CASCADE,
-              invitee    BLOB NOT NULL,
-              inviter    BLOB NOT NULL,
-              expires_at INTEGER NOT NULL,
-              PRIMARY KEY (party_id, invitee)
-            )
-            """
+    SqlStatements.load("party/create-parties.sql"),
+    SqlStatements.load("party/create-party-members.sql"),
+    SqlStatements.load("party/create-party-invites.sql")
   };
 
+  private final HikariDataSource dataSource;
   private final Connection connection;
 
   SqliteConnection(String jdbcUrl) {
@@ -52,17 +31,21 @@ final class SqliteConnection implements AutoCloseable {
 
   SqliteConnection(String jdbcUrl, String[] schema) {
     try {
-      Class.forName("org.sqlite.JDBC");
-      connection = DriverManager.getConnection(jdbcUrl);
+      this.dataSource = SqlitePool.open(jdbcUrl);
+      this.connection = dataSource.getConnection();
       try (var statement = connection.createStatement()) {
-        statement.execute("PRAGMA foreign_keys = ON");
+        statement.execute(SqlStatements.load("pragma-foreign-keys.sql"));
         for (String ddl : schema) {
           statement.execute(ddl);
         }
       }
-    } catch (SQLException | ClassNotFoundException e) {
+    } catch (SQLException e) {
       throw new IllegalStateException("Failed to open SQLite store at " + jdbcUrl, e);
     }
+  }
+
+  HikariDataSource dataSource() {
+    return dataSource;
   }
 
   Connection connection() {
@@ -96,5 +79,6 @@ final class SqliteConnection implements AutoCloseable {
     } catch (SQLException ignored) {
       // Nothing useful to do on close failure.
     }
+    dataSource.close();
   }
 }

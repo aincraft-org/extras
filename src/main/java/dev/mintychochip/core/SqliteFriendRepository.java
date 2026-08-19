@@ -23,22 +23,8 @@ import java.util.UUID;
 public final class SqliteFriendRepository implements FriendRepository {
 
   private static final String[] SCHEMA = {
-    """
-            CREATE TABLE IF NOT EXISTS friend_requests (
-              requester  BLOB NOT NULL,
-              target     BLOB NOT NULL,
-              created_at INTEGER NOT NULL,
-              PRIMARY KEY (requester, target)
-            )
-            """,
-    """
-            CREATE TABLE IF NOT EXISTS friendships (
-              player_a   BLOB NOT NULL,
-              player_b   BLOB NOT NULL,
-              since      INTEGER NOT NULL,
-              PRIMARY KEY (player_a, player_b)
-            )
-            """
+    SqlStatements.load("friend/create-requests.sql"),
+    SqlStatements.load("friend/create-friendships.sql")
   };
 
   private final SqliteConnection sqlite;
@@ -56,10 +42,7 @@ public final class SqliteFriendRepository implements FriendRepository {
     byte[] requester = SqliteConnection.uuidToBytes(requesterId);
     byte[] target = SqliteConnection.uuidToBytes(targetId);
     try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement(
-                "SELECT created_at FROM friend_requests WHERE requester = ? AND target = ?")) {
+        sqlite.connection().prepareStatement(SqlStatements.load("friend/select-request.sql"))) {
       stmt.setBytes(1, requester);
       stmt.setBytes(2, target);
       try (ResultSet rs = stmt.executeQuery()) {
@@ -75,20 +58,12 @@ public final class SqliteFriendRepository implements FriendRepository {
 
   @Override
   public List<FriendRequest> findIncoming(UUID targetId) {
-    return findRequests(
-        "SELECT requester, created_at FROM friend_requests WHERE target = ? "
-            + "ORDER BY created_at ASC",
-        targetId,
-        true);
+    return findRequests(SqlStatements.load("friend/select-incoming.sql"), targetId, true);
   }
 
   @Override
   public List<FriendRequest> findOutgoing(UUID requesterId) {
-    return findRequests(
-        "SELECT target, created_at FROM friend_requests WHERE requester = ? "
-            + "ORDER BY created_at ASC",
-        requesterId,
-        false);
+    return findRequests(SqlStatements.load("friend/select-outgoing.sql"), requesterId, false);
   }
 
   private List<FriendRequest> findRequests(String sql, UUID playerId, boolean incoming) {
@@ -115,10 +90,7 @@ public final class SqliteFriendRepository implements FriendRepository {
   public Optional<Instant> findFriendship(UUID playerA, UUID playerB) {
     UUID[] pair = SqliteConnection.canonicalPair(playerA, playerB);
     try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement(
-                "SELECT since FROM friendships WHERE player_a = ? AND player_b = ?")) {
+        sqlite.connection().prepareStatement(SqlStatements.load("friend/select-friendship.sql"))) {
       stmt.setBytes(1, SqliteConnection.uuidToBytes(pair[0]));
       stmt.setBytes(2, SqliteConnection.uuidToBytes(pair[1]));
       try (ResultSet rs = stmt.executeQuery()) {
@@ -137,12 +109,7 @@ public final class SqliteFriendRepository implements FriendRepository {
     byte[] id = SqliteConnection.uuidToBytes(playerId);
     List<UUID> result = new ArrayList<>();
     try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement(
-                "SELECT CASE WHEN player_a = ? THEN player_b ELSE player_a END AS friend "
-                    + "FROM friendships WHERE player_a = ? OR player_b = ? "
-                    + "ORDER BY since ASC")) {
+        sqlite.connection().prepareStatement(SqlStatements.load("friend/select-friend-ids.sql"))) {
       stmt.setBytes(1, id);
       stmt.setBytes(2, id);
       stmt.setBytes(3, id);
@@ -162,9 +129,7 @@ public final class SqliteFriendRepository implements FriendRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "INSERT INTO friend_requests (requester, target, created_at) VALUES (?, ?, ?) "
-                      + "ON CONFLICT(requester, target) DO UPDATE SET created_at = excluded.created_at")) {
+              connection.prepareStatement(SqlStatements.load("friend/upsert-request.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(requesterId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(targetId));
             stmt.setLong(3, createdAt.toEpochMilli());
@@ -179,8 +144,7 @@ public final class SqliteFriendRepository implements FriendRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "DELETE FROM friend_requests WHERE requester = ? AND target = ?")) {
+              connection.prepareStatement(SqlStatements.load("friend/delete-request.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(requesterId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(targetId));
             stmt.executeUpdate();
@@ -195,8 +159,7 @@ public final class SqliteFriendRepository implements FriendRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "INSERT OR IGNORE INTO friendships (player_a, player_b, since) VALUES (?, ?, ?)")) {
+              connection.prepareStatement(SqlStatements.load("friend/insert-friendship.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(pair[0]));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(pair[1]));
             stmt.setLong(3, since.toEpochMilli());
@@ -212,8 +175,7 @@ public final class SqliteFriendRepository implements FriendRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "DELETE FROM friendships WHERE player_a = ? AND player_b = ?")) {
+              connection.prepareStatement(SqlStatements.load("friend/delete-friendship.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(pair[0]));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(pair[1]));
             stmt.executeUpdate();

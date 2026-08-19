@@ -36,9 +36,7 @@ public final class SqlitePartyRepository implements PartyRepository {
   public Optional<Party> findById(UUID partyId) {
     byte[] id = SqliteConnection.uuidToBytes(partyId);
     try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement("SELECT name, leader, created_at FROM parties WHERE party_id = ?")) {
+        sqlite.connection().prepareStatement(SqlStatements.load("party/select-by-id.sql"))) {
       stmt.setBytes(1, id);
       try (ResultSet rs = stmt.executeQuery()) {
         if (!rs.next()) {
@@ -62,9 +60,7 @@ public final class SqlitePartyRepository implements PartyRepository {
   public Optional<Party> findByMember(UUID playerId) {
     byte[] member = SqliteConnection.uuidToBytes(playerId);
     try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement("SELECT party_id FROM party_members WHERE member = ?")) {
+        sqlite.connection().prepareStatement(SqlStatements.load("party/select-id-by-member.sql"))) {
       stmt.setBytes(1, member);
       try (ResultSet rs = stmt.executeQuery()) {
         if (!rs.next()) {
@@ -84,10 +80,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     try (PreparedStatement stmt =
         sqlite
             .connection()
-            .prepareStatement(
-                "SELECT party_id, inviter, expires_at FROM party_invites "
-                    + "WHERE invitee = ? AND expires_at > ? "
-                    + "ORDER BY expires_at DESC")) {
+            .prepareStatement(SqlStatements.load("party/select-pending-invites.sql"))) {
       stmt.setBytes(1, invitee);
       stmt.setLong(2, now.toEpochMilli());
       try (ResultSet rs = stmt.executeQuery()) {
@@ -112,11 +105,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     byte[] party = SqliteConnection.uuidToBytes(partyId);
     byte[] inviteeBytes = SqliteConnection.uuidToBytes(invitee);
     try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement(
-                "SELECT inviter, expires_at FROM party_invites "
-                    + "WHERE party_id = ? AND invitee = ? AND expires_at > ?")) {
+        sqlite.connection().prepareStatement(SqlStatements.load("party/select-invite.sql"))) {
       stmt.setBytes(1, party);
       stmt.setBytes(2, inviteeBytes);
       stmt.setLong(3, now.toEpochMilli());
@@ -140,10 +129,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     byte[] party = SqliteConnection.uuidToBytes(partyId);
     List<UUID> members = new ArrayList<>();
     try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement(
-                "SELECT member FROM party_members WHERE party_id = ? ORDER BY joined_at ASC")) {
+        sqlite.connection().prepareStatement(SqlStatements.load("party/select-members.sql"))) {
       stmt.setBytes(1, party);
       try (ResultSet rs = stmt.executeQuery()) {
         while (rs.next()) {
@@ -161,8 +147,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     try (PreparedStatement stmt =
         sqlite
             .connection()
-            .prepareStatement(
-                "SELECT invitee, inviter, expires_at FROM party_invites WHERE party_id = ?")) {
+            .prepareStatement(SqlStatements.load("party/select-invites-by-party.sql"))) {
       stmt.setBytes(1, party);
       try (ResultSet rs = stmt.executeQuery()) {
         while (rs.next()) {
@@ -186,7 +171,7 @@ public final class SqlitePartyRepository implements PartyRepository {
         connection -> {
           try (PreparedStatement stmt =
               connection.prepareStatement(
-                  "UPDATE party_invites SET inviter = ? " + "WHERE party_id = ? AND inviter = ?")) {
+                  SqlStatements.load("party/reassign-invite-inviter.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(newLeader));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(partyId));
             stmt.setBytes(3, SqliteConnection.uuidToBytes(oldLeader));
@@ -201,8 +186,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "INSERT INTO parties (party_id, name, leader, created_at) VALUES (?, ?, ?, ?)")) {
+              connection.prepareStatement(SqlStatements.load("party/insert.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
             stmt.setString(2, name);
             stmt.setBytes(3, SqliteConnection.uuidToBytes(leaderId));
@@ -219,7 +203,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement("DELETE FROM parties WHERE party_id = ?")) {
+              connection.prepareStatement(SqlStatements.load("party/delete.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
             stmt.executeUpdate();
           }
@@ -239,8 +223,7 @@ public final class SqlitePartyRepository implements PartyRepository {
   private static void insertMember(
       Connection connection, UUID partyId, UUID memberId, Instant joinedAt) throws SQLException {
     try (PreparedStatement stmt =
-        connection.prepareStatement(
-            "INSERT INTO party_members (party_id, member, joined_at) VALUES (?, ?, ?)")) {
+        connection.prepareStatement(SqlStatements.load("party/insert-member.sql"))) {
       stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
       stmt.setBytes(2, SqliteConnection.uuidToBytes(memberId));
       stmt.setLong(3, joinedAt.toEpochMilli());
@@ -253,8 +236,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "DELETE FROM party_members WHERE party_id = ? AND member = ?")) {
+              connection.prepareStatement(SqlStatements.load("party/delete-member.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(memberId));
             stmt.executeUpdate();
@@ -268,7 +250,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement("UPDATE parties SET leader = ? WHERE party_id = ?")) {
+              connection.prepareStatement(SqlStatements.load("party/set-leader.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(leaderId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(partyId));
             stmt.executeUpdate();
@@ -282,10 +264,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "INSERT INTO party_invites (party_id, invitee, inviter, expires_at) VALUES (?, ?, ?, ?) "
-                      + "ON CONFLICT(party_id, invitee) DO UPDATE SET inviter = excluded.inviter, "
-                      + "expires_at = excluded.expires_at")) {
+              connection.prepareStatement(SqlStatements.load("party/upsert-invite.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(invitee));
             stmt.setBytes(3, SqliteConnection.uuidToBytes(inviter));
@@ -301,8 +280,7 @@ public final class SqlitePartyRepository implements PartyRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "DELETE FROM party_invites WHERE party_id = ? AND invitee = ?")) {
+              connection.prepareStatement(SqlStatements.load("party/delete-invite.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(invitee));
             stmt.executeUpdate();
@@ -317,8 +295,7 @@ public final class SqlitePartyRepository implements PartyRepository {
         connection -> {
           insertMember(connection, partyId, invitee, joinedAt);
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "DELETE FROM party_invites WHERE party_id = ? AND invitee = ?")) {
+              connection.prepareStatement(SqlStatements.load("party/delete-invite.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(invitee));
             stmt.executeUpdate();
@@ -332,14 +309,13 @@ public final class SqlitePartyRepository implements PartyRepository {
     inTransaction(
         connection -> {
           try (PreparedStatement stmt =
-              connection.prepareStatement("UPDATE parties SET leader = ? WHERE party_id = ?")) {
+              connection.prepareStatement(SqlStatements.load("party/set-leader.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(newLeader));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(partyId));
             stmt.executeUpdate();
           }
           try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  "DELETE FROM party_members WHERE party_id = ? AND member = ?")) {
+              connection.prepareStatement(SqlStatements.load("party/delete-member.sql"))) {
             stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
             stmt.setBytes(2, SqliteConnection.uuidToBytes(oldLeader));
             stmt.executeUpdate();

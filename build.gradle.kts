@@ -175,6 +175,7 @@ dependencies {
     compileOnly(libs.paper.api)
     compileOnly(libs.mapgui.api)
     implementation(libs.sqlite.jdbc)
+    implementation(libs.hikaricp)
 
     testImplementation(libs.paper.api)
     testImplementation(platform(libs.junit.bom))
