@@ -8,8 +8,8 @@
 
 Operators and downstream plugins define custom advancements (stable id +
 Minecraft display fields). Granting one persists completion and, on the first
-successful grant, shows a Minecraft advancement toast via Paper's
-advancement-display path — not chat, title, or action bar.
+successful grant, shows a Minecraft advancement toast via the standalone
+`ToastService` SPI — not chat, title, or action bar.
 
 ## Boundaries
 
@@ -18,8 +18,8 @@ advancement-display path — not chat, title, or action bar.
   frame (`task` / `goal` / `challenge`)
 - Grant / has / list completions with JSON-per-player persistence
 - Idempotent repeat grant; unknown ids rejected and not persisted
-- First-time grant publishes `AdvancementGranted` after persist, then Paper
-  sends an advancement toast (title + icon + frame, `show_toast`)
+- First-time grant publishes `AdvancementGranted` after persist, then the
+  paper listener calls `ToastService` with title, icon, and frame
 - Operator `/advancements grant|list` and ServicesManager SPI registration
 
 ### Out of scope / non-goals
@@ -38,30 +38,27 @@ advancement-display path — not chat, title, or action bar.
 - Repeat grant of a completed id is `ALREADY_COMPLETED`, does not duplicate
   the completion, emits no event, and requests no toast.
 - Completions survive reconstructing the service on the same store.
-- Toast payload title, icon, and frame match the catalog entry; frame maps to
-  `io.papermc.paper.advancement.AdvancementDisplay.Frame` and `show_toast` is
-  true. Chat/title/action-bar are not substitutes.
+- Toast payload title, icon, and frame match the catalog entry and are sent
+  through `ToastService` (not a parallel advancement-owned sender).
+  Chat/title/action-bar are not substitutes.
 
 ## Implementation guidance
 
 - `api` = Bukkit-free SPI (`AdvancementService`, `CustomAdvancement`,
-  `AdvancementFrame`, `AdvancementResult`) plus the toast API
-  (`AdvancementToastRequest`, `AdvancementToastSender`).
+  `AdvancementFrame`, `AdvancementResult`). Toasts live in `api.toast`.
 - `core` = `DefaultAdvancementService` (single mutation lock, per-player
   cache) over `JsonAdvancementRepository` (`<data>/advancements/<uuid>.json`).
   Events publish only after the JSON write, outside the mutation lock.
-- `paper` = YAML catalog (`advancements.yml`), `AdvancementCommand`,
-  `AdvancementToastListener` on `AdvancementGranted`, and
-  `PaperAdvancementToastSender` which maps the toast request onto Paper
-  `AdvancementDisplay` frames + a temporary `show_toast` advancement
-  grant/revoke. Tests assert the shipped mapper/sender payload, not a client.
-- Register `AdvancementService` and `AdvancementToastSender` on
-  ServicesManager at Normal priority, matching other domains.
+- `paper` = YAML catalog (`advancements.yml`), `AdvancementCommand`, and
+  `AdvancementToastListener` on `AdvancementGranted` which maps catalog
+  display fields onto `ToastService`. Packet sending is owned by toast.
+- Register `AdvancementService` on ServicesManager at Normal priority.
+  Toast registration is the toast domain's job.
 
 ## Current
 
 - [x] Custom-advancement catalog + grant/query/persist SPI
-- [x] First-time grant toast via Paper AdvancementDisplay + `show_toast`
+- [x] First-time grant toast via standalone `ToastService`
 - [x] `/advancements` grant/list + permissions + plugin registration
 
 ## Next
@@ -80,6 +77,7 @@ advancement-display path — not chat, title, or action bar.
 |------|----------|-----|
 | 2026-08-19 | JSON-per-player completions, in-memory+YAML catalog | Completions are a set of ids (titles-shaped); catalog is operator/downstream defined |
 | 2026-08-19 | Toast via temporary advancement display packet, not chat/title/action bar | Paper 1.21.11 has no `Player.sendToast`; criterion is AdvancementDisplay + `show_toast` |
+| 2026-08-19 | Advancements consume `ToastService` instead of owning a sender | Toast is a shared SPI; Adventure has no sendToast |
 | 2026-08-19 | Command is `/advancements` (not vanilla `/advancement`) | Avoid colliding with Minecraft's advancement command |
 
 ## Open questions
