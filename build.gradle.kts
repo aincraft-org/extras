@@ -145,7 +145,7 @@ publishing {
             pom {
                 configureExtrasPom(
                     displayName = "Extras API",
-                    artifactDescription = "Bukkit-free API for parties, friendships, titles, and player mailboxes.",
+                    artifactDescription = "Bukkit-free API for parties, friendships, titles, advancements, mailboxes, trading, chat, and rewards.",
                 )
             }
         }
@@ -159,7 +159,7 @@ publishing {
             pom {
                 configureExtrasPom(
                     displayName = "Extras Paper",
-                    artifactDescription = "Standalone Paper plugin for parties, friendships, titles, and mailboxes.",
+                    artifactDescription = "Standalone Paper plugin adding parties, friendships, titles, advancements, mailboxes, trading, chat channels, and daily rewards.",
                 )
             }
         }
