@@ -3,93 +3,82 @@ package dev.mintychochip.core;
 import dev.mintychochip.api.ChannelId;
 import dev.mintychochip.api.ChannelPreferences;
 import java.nio.file.Path;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.EnumSet;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** SQLite-backed persistent chat preferences. */
+/** SQLite-backed persistent chat preferences using the Utilities SQL lifecycle. */
 public final class SqliteChatRepository implements ChatRepository {
 
   private final SqliteConnection database;
 
   public SqliteChatRepository(Path file) {
     this.database =
-        new SqliteConnection(
-            "jdbc:sqlite:" + file.toAbsolutePath(),
-            new String[] {
-              SqlStatements.load("chat/create-preferences.sql"),
-              SqlStatements.load("chat/create-muted-channels.sql")
-            });
+        new SqliteConnection("jdbc:sqlite:" + file.toAbsolutePath(), "classpath:db/migration/chat");
   }
 
   @Override
   public synchronized Optional<ChannelPreferences> load(UUID playerId) {
-    try (var statement =
-        database.connection().prepareStatement(SqlStatements.load("chat/select-active.sql"))) {
-      statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
-      try (ResultSet result = statement.executeQuery()) {
-        if (!result.next()) {
-          return Optional.empty();
-        }
-        ChannelId active =
-            ChannelId.parse(result.getString("active_channel")).orElse(ChannelId.GLOBAL);
-        EnumSet<ChannelId> muted = EnumSet.noneOf(ChannelId.class);
-        try (var mutedStatement =
-            database.connection().prepareStatement(SqlStatements.load("chat/select-muted.sql"))) {
-          mutedStatement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
-          try (ResultSet mutedRows = mutedStatement.executeQuery()) {
-            while (mutedRows.next()) {
-              ChannelId.parse(mutedRows.getString("channel")).ifPresent(muted::add);
-            }
-          }
-        }
-        return Optional.of(new ChannelPreferences(playerId, active, muted));
-      }
-    } catch (SQLException exception) {
-      throw new IllegalStateException("Failed to load chat preferences", exception);
+    Objects.requireNonNull(playerId, "playerId");
+    try {
+      return database.withHandle(
+          handle -> {
+            Optional<ChannelId> active =
+                handle
+                    .createQuery(SqlStatements.load("chat/select-active.sql"))
+                    .bind(0, SqliteConnection.uuidToBytes(playerId))
+                    .map(
+                        (row, context) ->
+                            ChannelId.parse(row.getString("active_channel"))
+                                .orElse(ChannelId.GLOBAL))
+                    .findOne();
+            return active.map(
+                selected -> {
+                  EnumSet<ChannelId> muted = EnumSet.noneOf(ChannelId.class);
+                  handle
+                      .createQuery(SqlStatements.load("chat/select-muted.sql"))
+                      .bind(0, SqliteConnection.uuidToBytes(playerId))
+                      .map((row, context) -> row.getString("channel"))
+                      .list()
+                      .forEach(channel -> ChannelId.parse(channel).ifPresent(muted::add));
+                  return new ChannelPreferences(playerId, selected, muted);
+                });
+          });
+    } catch (RuntimeException e) {
+      throw new IllegalStateException("Failed to load chat preferences", e);
     }
   }
 
   @Override
   public synchronized void save(ChannelPreferences preferences) {
-    var connection = database.connection();
+    Objects.requireNonNull(preferences, "preferences");
     try {
-      connection.setAutoCommit(false);
-      try (var statement =
-          connection.prepareStatement(SqlStatements.load("chat/upsert-preferences.sql"))) {
-        statement.setBytes(1, SqliteConnection.uuidToBytes(preferences.playerId()));
-        statement.setString(2, preferences.activeChannel().key());
-        statement.setLong(3, System.currentTimeMillis());
-        statement.executeUpdate();
-      }
-      try (var delete = connection.prepareStatement(SqlStatements.load("chat/delete-muted.sql"))) {
-        delete.setBytes(1, SqliteConnection.uuidToBytes(preferences.playerId()));
-        delete.executeUpdate();
-      }
-      try (var insert = connection.prepareStatement(SqlStatements.load("chat/insert-muted.sql"))) {
-        for (ChannelId channel : preferences.mutedChannels()) {
-          insert.setBytes(1, SqliteConnection.uuidToBytes(preferences.playerId()));
-          insert.setString(2, channel.key());
-          insert.addBatch();
-        }
-        insert.executeBatch();
-      }
-      connection.commit();
-    } catch (SQLException exception) {
-      try {
-        connection.rollback();
-      } catch (SQLException rollbackException) {
-        exception.addSuppressed(rollbackException);
-      }
-      throw new IllegalStateException("Failed to save chat preferences", exception);
-    } finally {
-      try {
-        connection.setAutoCommit(true);
-      } catch (SQLException exception) {
-        throw new IllegalStateException("Failed to restore SQLite transaction mode", exception);
-      }
+      database.useTransaction(
+          handle -> {
+            handle
+                .createUpdate(SqlStatements.load("chat/upsert-preferences.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(preferences.playerId()))
+                .bind(1, preferences.activeChannel().key())
+                .bind(2, System.currentTimeMillis())
+                .execute();
+            handle
+                .createUpdate(SqlStatements.load("chat/delete-muted.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(preferences.playerId()))
+                .execute();
+            if (!preferences.mutedChannels().isEmpty()) {
+              var batch = handle.prepareBatch(SqlStatements.load("chat/insert-muted.sql"));
+              for (ChannelId channel : preferences.mutedChannels()) {
+                batch
+                    .bind(0, SqliteConnection.uuidToBytes(preferences.playerId()))
+                    .bind(1, channel.key())
+                    .add();
+              }
+              batch.execute();
+            }
+          });
+    } catch (RuntimeException e) {
+      throw new IllegalStateException("Failed to save chat preferences", e);
     }
   }
 

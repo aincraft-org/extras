@@ -40,8 +40,9 @@ grouping).
 
 - `api` = Bukkit-free SPI + immutable value types.
 - `core` = synchronized `DefaultPartyService` over a single-connection
-  `SqlitePartyRepository`. Mutations guard check-then-act invariants with a
-  single internal lock; reads hit a member-keyed cache first.
+  Utilities `SqlDatabase`/JDBI-backed `SqlitePartyRepository`, with explicit
+  `db/migration/party` migrations. Mutations guard check-then-act invariants
+  with a single internal lock; reads hit a member-keyed cache first.
 - `paper` = `ExtrasPlugin` (ServicesManager registration, lifecycle command
   registration, close on disable), `PartyCommand` (BasicCommand), and
   `PartyLifecycleListener` (announce from `PlayerJoinEvent`/`PlayerQuitEvent`
@@ -74,7 +75,7 @@ grouping).
 
 | Date | Decision | Why |
 |------|----------|-----|
-| 2026-08-08 | Persistence uses SQLite (raw JDBC, single connection) | Per user; deterministic and matches sibling modular plugins |
+| 2026-08-08 | Persistence uses SQLite (Utilities-managed JDBI, single connection) | Per user; deterministic and matches sibling modular plugins |
 | 2026-08-08 | Presence hooks live in the paper listener, not the SPI | First-class SPI stays implementation-neutral |
 | 2026-08-08 | Mutations synchronized on one internal lock | Cap/leadership check-then-act must be atomic under concurrency |
 | 2026-08-16 | MapGUI tabbed social menu (Friends/Party/Invites) and player picker | Adds a graphical friends/party list without changing `FriendService` or `PartyService` contracts; `mapgui-api` is `compileOnly` and MapGUI is a required server plugin via `paper-plugin.yml` |

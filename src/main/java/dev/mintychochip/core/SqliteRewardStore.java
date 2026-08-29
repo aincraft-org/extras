@@ -13,176 +13,158 @@ import dev.mintychochip.api.rewards.PlayTimeCriterion;
 import dev.mintychochip.api.rewards.Reward;
 import dev.mintychochip.api.rewards.RewardType;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
+import org.jdbi.v3.core.Handle;
 
 /** SQLite persistence for all reward, streak, and leaderboard state. */
 public final class SqliteRewardStore implements AutoCloseable {
-
-  private static final String[] SCHEMA = {
-    SqlStatements.load("reward/create-daily-criteria.sql"),
-    SqlStatements.load("reward/create-daily-progress.sql"),
-    SqlStatements.load("reward/create-streaks.sql"),
-    SqlStatements.load("reward/create-leaderboard-totals.sql")
-  };
 
   private final SqliteConnection sqlite;
 
   public SqliteRewardStore(Path databaseFile) {
     Objects.requireNonNull(databaseFile, "databaseFile");
-    this.sqlite = new SqliteConnection("jdbc:sqlite:" + databaseFile.toAbsolutePath(), SCHEMA);
-  }
-
-  Connection connection() {
-    return sqlite.connection();
+    this.sqlite =
+        new SqliteConnection(
+            "jdbc:sqlite:" + databaseFile.toAbsolutePath(), "classpath:db/migration/reward");
   }
 
   Optional<CriterionSnapshot> findCriterion(String day) {
-    try (PreparedStatement statement =
-        connection().prepareStatement(SqlStatements.load("reward/select-criterion.sql"))) {
-      statement.setString(1, day);
-      try (ResultSet result = statement.executeQuery()) {
-        return result.next() ? Optional.of(mapCriterion(result)) : Optional.empty();
-      }
-    } catch (SQLException exception) {
-      throw failure("read criterion " + day, exception);
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("reward/select-criterion.sql"))
+                  .bind(0, day)
+                  .map((row, context) -> mapCriterion(row))
+                  .findOne());
+    } catch (RuntimeException e) {
+      throw failure("read criterion " + day, e);
     }
   }
 
   void saveCriterion(CriterionSnapshot snapshot) {
+    Objects.requireNonNull(snapshot, "snapshot");
     Criterion criterion = snapshot.criterion();
     CriterionKey key = CriterionKey.from(criterion);
-    inTransaction(
-        connection -> {
-          try (PreparedStatement statement =
-              connection.prepareStatement(SqlStatements.load("reward/upsert-criterion.sql"))) {
-            statement.setString(1, snapshot.day().toString());
-            statement.setString(2, criterion.id());
-            statement.setString(3, criterion.kind().name());
-            statement.setString(4, key.value());
-            statement.setInt(5, criterion.target());
-            statement.setString(6, criterion.description());
-            statement.setString(7, criterion.reward().type().name());
-            statement.setString(8, criterion.reward().payload());
-            statement.setInt(9, criterion.reward().amount());
-            statement.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("reward/upsert-criterion.sql"))
+                .bind(0, snapshot.day().toString())
+                .bind(1, criterion.id())
+                .bind(2, criterion.kind().name())
+                .bind(3, key.value())
+                .bind(4, criterion.target())
+                .bind(5, criterion.description())
+                .bind(6, criterion.reward().type().name())
+                .bind(7, criterion.reward().payload())
+                .bind(8, criterion.reward().amount())
+                .execute());
   }
 
   ProgressRow findProgress(UUID playerId, String day, String criterionId) {
-    try (PreparedStatement statement =
-        connection().prepareStatement(SqlStatements.load("reward/select-progress.sql"))) {
-      statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
-      statement.setString(2, day);
-      statement.setString(3, criterionId);
-      try (ResultSet result = statement.executeQuery()) {
-        if (!result.next()) {
-          return new ProgressRow(0, false);
-        }
-        return new ProgressRow(result.getInt("amount"), result.getInt("claimed") != 0);
-      }
-    } catch (SQLException exception) {
-      throw failure("read progress for " + playerId, exception);
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("reward/select-progress.sql"))
+                  .bind(0, SqliteConnection.uuidToBytes(playerId))
+                  .bind(1, day)
+                  .bind(2, criterionId)
+                  .map(
+                      (row, context) ->
+                          new ProgressRow(row.getInt("amount"), row.getInt("claimed") != 0))
+                  .findOne()
+                  .orElseGet(() -> new ProgressRow(0, false)));
+    } catch (RuntimeException e) {
+      throw failure("read progress for " + playerId, e);
     }
   }
 
   void saveProgress(UUID playerId, String day, String criterionId, int amount, boolean claimed) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement statement =
-              connection.prepareStatement(SqlStatements.load("reward/upsert-progress.sql"))) {
-            statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
-            statement.setString(2, day);
-            statement.setString(3, criterionId);
-            statement.setInt(4, amount);
-            statement.setInt(5, claimed ? 1 : 0);
-            statement.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("reward/upsert-progress.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(playerId))
+                .bind(1, day)
+                .bind(2, criterionId)
+                .bind(3, amount)
+                .bind(4, claimed ? 1 : 0)
+                .execute());
   }
 
   List<LeaderboardRow> leaderboard(String period, String windowKey, int limit) {
-    List<LeaderboardRow> rows = new ArrayList<>();
-    try (PreparedStatement statement =
-        connection().prepareStatement(SqlStatements.load("reward/select-leaderboard.sql"))) {
-      statement.setString(1, period);
-      statement.setString(2, windowKey);
-      statement.setInt(3, limit);
-      try (ResultSet result = statement.executeQuery()) {
-        while (result.next()) {
-          rows.add(
-              new LeaderboardRow(
-                  SqliteConnection.uuidFromBytes(result.getBytes("player_id")),
-                  result.getLong("total"),
-                  result.getLong("updated_at")));
-        }
-      }
-      return rows;
-    } catch (SQLException exception) {
-      throw failure("read leaderboard " + period + "/" + windowKey, exception);
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("reward/select-leaderboard.sql"))
+                  .bind(0, period)
+                  .bind(1, windowKey)
+                  .bind(2, limit)
+                  .map(
+                      (row, context) ->
+                          new LeaderboardRow(
+                              SqliteConnection.uuidFromBytes(row.getBytes("player_id")),
+                              row.getLong("total"),
+                              row.getLong("updated_at")))
+                  .list());
+    } catch (RuntimeException e) {
+      throw failure("read leaderboard " + period + "/" + windowKey, e);
     }
   }
 
   void addLeaderboard(UUID playerId, String period, String windowKey, long amount, Instant now) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement statement =
-              connection.prepareStatement(SqlStatements.load("reward/add-leaderboard.sql"))) {
-            statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
-            statement.setString(2, period);
-            statement.setString(3, windowKey);
-            statement.setLong(4, amount);
-            statement.setLong(5, now.toEpochMilli());
-            statement.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("reward/add-leaderboard.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(playerId))
+                .bind(1, period)
+                .bind(2, windowKey)
+                .bind(3, amount)
+                .bind(4, now.toEpochMilli())
+                .execute());
   }
 
   Optional<StreakRow> findStreak(UUID playerId) {
-    try (PreparedStatement statement =
-        connection().prepareStatement(SqlStatements.load("reward/select-streak.sql"))) {
-      statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
-      try (ResultSet result = statement.executeQuery()) {
-        if (!result.next()) {
-          return Optional.empty();
-        }
-        return Optional.of(
-            new StreakRow(
-                result.getInt("current_streak"),
-                result.getInt("best_streak"),
-                LocalDate.parse(result.getString("last_login_date"))));
-      }
-    } catch (SQLException exception) {
-      throw failure("read streak for " + playerId, exception);
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("reward/select-streak.sql"))
+                  .bind(0, SqliteConnection.uuidToBytes(playerId))
+                  .map(
+                      (row, context) ->
+                          new StreakRow(
+                              row.getInt("current_streak"),
+                              row.getInt("best_streak"),
+                              LocalDate.parse(row.getString("last_login_date"))))
+                  .findOne());
+    } catch (RuntimeException e) {
+      throw failure("read streak for " + playerId, e);
     }
   }
 
   void saveStreak(UUID playerId, int current, int best, LocalDate lastLogin) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement statement =
-              connection.prepareStatement(SqlStatements.load("reward/upsert-streak.sql"))) {
-            statement.setBytes(1, SqliteConnection.uuidToBytes(playerId));
-            statement.setInt(2, current);
-            statement.setInt(3, best);
-            statement.setString(4, lastLogin.toString());
-            statement.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("reward/upsert-streak.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(playerId))
+                .bind(1, current)
+                .bind(2, best)
+                .bind(3, lastLogin.toString())
+                .execute());
   }
 
   private CriterionSnapshot mapCriterion(ResultSet result) throws SQLException {
@@ -211,26 +193,15 @@ public final class SqliteRewardStore implements AutoCloseable {
     return new CriterionSnapshot(LocalDate.parse(result.getString("day")), criterion);
   }
 
-  private void inTransaction(TransactionAction action) {
-    Connection connection = connection();
+  private void transaction(Consumer<Handle> action) {
     try {
-      boolean autoCommit = connection.getAutoCommit();
-      connection.setAutoCommit(false);
-      try {
-        action.run(connection);
-        connection.commit();
-      } catch (SQLException | RuntimeException exception) {
-        connection.rollback();
-        throw exception;
-      } finally {
-        connection.setAutoCommit(autoCommit);
-      }
-    } catch (SQLException exception) {
-      throw failure("transaction", exception);
+      sqlite.useTransaction(action);
+    } catch (RuntimeException e) {
+      throw failure("transaction", e);
     }
   }
 
-  private static IllegalStateException failure(String action, SQLException exception) {
+  private static IllegalStateException failure(String action, RuntimeException exception) {
     return new IllegalStateException("Failed to " + action, exception);
   }
 
@@ -256,10 +227,5 @@ public final class SqliteRewardStore implements AutoCloseable {
         case PlayTimeCriterion ignored -> new CriterionKey("seconds");
       };
     }
-  }
-
-  @FunctionalInterface
-  private interface TransactionAction {
-    Void run(Connection connection) throws SQLException;
   }
 }

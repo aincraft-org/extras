@@ -63,7 +63,8 @@ source of truth.
   `LoginStreakService`, `CriterionProvider`.
 - `core` = `SqliteRewardStore`, `DailyWindow`,
   `DefaultDailyRewardService`, `DefaultLeaderboardService`, and
-  `DefaultLoginStreakService`; one store owns the SQLite connection.
+  `DefaultLoginStreakService`; the store owns a utility-managed SQLite/JDBI
+  lifecycle with explicit `db/migration/reward` migrations.
 - `paper` = `RewardsConfig`, `RewardsCommand`, `RewardsListener`, and
   `WorkflowzCriterionProvider`; Paper executes descriptors after core claims.
 - `ExtrasPlugin` owns construction, ServicesManager registration, event

@@ -167,6 +167,20 @@ publishing {
 }
 
 repositories {
+    maven {
+        name = "UtilitiesGitHubPackages"
+        url = uri("https://maven.pkg.github.com/mintychochip/Utilities")
+        credentials {
+            username =
+                project.findProperty("gpr.user") as String?
+                    ?: System.getenv("GITHUB_ACTOR")
+                    ?: ""
+            password =
+                project.findProperty("gpr.key") as String?
+                    ?: System.getenv("GITHUB_TOKEN")
+                    ?: ""
+        }
+    }
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
 }
@@ -174,8 +188,9 @@ repositories {
 dependencies {
     compileOnly(libs.paper.api)
     compileOnly(libs.mapgui.api)
+    implementation("org.aincraft:utilities-common:2026.08.27")
+    implementation("org.aincraft:utilities-db-sql:2026.08.27")
     implementation(libs.sqlite.jdbc)
-    implementation(libs.hikaricp)
 
     testImplementation(libs.paper.api)
     testImplementation(platform(libs.junit.bom))
