@@ -45,8 +45,9 @@ and presence announcements to online friends.
   `core` = synchronized `DefaultFriendService` over a single-connection
   `SqliteFriendRepository`; `paper` = `FriendCommand` (BasicCommand) and
   `FriendLifecycleListener`.
-- Friends use their own `friends.db` (schema in `SqliteFriendRepository`),
-  isolated from `party.db`; reuse `SqliteConnection` with a schema argument.
+- Friends use their own `friends.db`, isolated from `party.db`; the repository
+  uses the Utilities `SqlDatabase`/JDBI lifecycle with an explicit
+  `db/migration/friend` schema location.
 - Canonical pairing lives in `SqliteConnection.canonicalPair`; the repository
   stores the ordered pair, the service never sees ordering.
 - Paper command helpers (`PlayerIds.requirePlayer`, `resolvePlayerId`,

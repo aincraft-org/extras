@@ -3,29 +3,23 @@ package dev.mintychochip.core;
 import dev.mintychochip.api.Party;
 import dev.mintychochip.api.PartyInvite;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
+import org.jdbi.v3.core.Handle;
 
-/**
- * SQLite-backed {@link PartyRepository}.
- *
- * <p>Every mutating operation runs inside one transaction on the shared connection; reads commit
- * nothing. Expired invites are filtered on read.
- */
+/** SQLite-backed {@link PartyRepository} using the Utilities SQL lifecycle. */
 public final class SqlitePartyRepository implements PartyRepository {
 
   private final SqliteConnection sqlite;
 
   public SqlitePartyRepository(Path databaseFile) {
-    this(new SqliteConnection("jdbc:sqlite:" + databaseFile.toAbsolutePath()));
+    this(
+        new SqliteConnection(
+            "jdbc:sqlite:" + databaseFile.toAbsolutePath(), "classpath:db/migration/party"));
   }
 
   SqlitePartyRepository(SqliteConnection sqlite) {
@@ -34,325 +28,272 @@ public final class SqlitePartyRepository implements PartyRepository {
 
   @Override
   public Optional<Party> findById(UUID partyId) {
-    byte[] id = SqliteConnection.uuidToBytes(partyId);
-    try (PreparedStatement stmt =
-        sqlite.connection().prepareStatement(SqlStatements.load("party/select-by-id.sql"))) {
-      stmt.setBytes(1, id);
-      try (ResultSet rs = stmt.executeQuery()) {
-        if (!rs.next()) {
-          return Optional.empty();
-        }
-        List<UUID> members = membersOf(partyId);
-        return Optional.of(
-            new Party(
-                partyId,
-                rs.getString("name"),
-                SqliteConnection.uuidFromBytes(rs.getBytes("leader")),
-                members,
-                Instant.ofEpochMilli(rs.getLong("created_at"))));
-      }
-    } catch (SQLException e) {
+    Objects.requireNonNull(partyId, "partyId");
+    try {
+      return sqlite.withHandle(handle -> findParty(handle, partyId));
+    } catch (RuntimeException e) {
       throw new IllegalStateException("Failed to read party " + partyId, e);
     }
   }
 
+  private Optional<Party> findParty(Handle handle, UUID partyId) {
+    byte[] id = SqliteConnection.uuidToBytes(partyId);
+    return handle
+        .createQuery(SqlStatements.load("party/select-by-id.sql"))
+        .bind(0, id)
+        .map(
+            (row, context) ->
+                new PartyRow(
+                    row.getString("name"),
+                    SqliteConnection.uuidFromBytes(row.getBytes("leader")),
+                    Instant.ofEpochMilli(row.getLong("created_at"))))
+        .findOne()
+        .map(
+            row ->
+                new Party(
+                    partyId,
+                    row.name(),
+                    row.leader(),
+                    membersOf(handle, partyId),
+                    row.createdAt()));
+  }
+
   @Override
   public Optional<Party> findByMember(UUID playerId) {
-    byte[] member = SqliteConnection.uuidToBytes(playerId);
-    try (PreparedStatement stmt =
-        sqlite.connection().prepareStatement(SqlStatements.load("party/select-id-by-member.sql"))) {
-      stmt.setBytes(1, member);
-      try (ResultSet rs = stmt.executeQuery()) {
-        if (!rs.next()) {
-          return Optional.empty();
-        }
-        return findById(SqliteConnection.uuidFromBytes(rs.getBytes("party_id")));
-      }
-    } catch (SQLException e) {
+    Objects.requireNonNull(playerId, "playerId");
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("party/select-id-by-member.sql"))
+                  .bind(0, SqliteConnection.uuidToBytes(playerId))
+                  .map((row, context) -> SqliteConnection.uuidFromBytes(row.getBytes("party_id")))
+                  .findFirst()
+                  .flatMap(partyId -> findParty(handle, partyId)));
+    } catch (RuntimeException e) {
       throw new IllegalStateException("Failed to find party of member " + playerId, e);
     }
   }
 
   @Override
   public List<PartyInvite> findPendingInvites(UUID playerId, Instant now) {
-    byte[] invitee = SqliteConnection.uuidToBytes(playerId);
-    List<PartyInvite> result = new ArrayList<>();
-    try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement(SqlStatements.load("party/select-pending-invites.sql"))) {
-      stmt.setBytes(1, invitee);
-      stmt.setLong(2, now.toEpochMilli());
-      try (ResultSet rs = stmt.executeQuery()) {
-        while (rs.next()) {
-          UUID partyId = SqliteConnection.uuidFromBytes(rs.getBytes("party_id"));
-          result.add(
-              new PartyInvite(
-                  partyId,
-                  SqliteConnection.uuidFromBytes(rs.getBytes("inviter")),
-                  playerId,
-                  Instant.ofEpochMilli(rs.getLong("expires_at"))));
-        }
-      }
-      return result;
-    } catch (SQLException e) {
+    Objects.requireNonNull(playerId, "playerId");
+    Objects.requireNonNull(now, "now");
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("party/select-pending-invites.sql"))
+                  .bind(0, SqliteConnection.uuidToBytes(playerId))
+                  .bind(1, now.toEpochMilli())
+                  .map(
+                      (row, context) ->
+                          new PartyInvite(
+                              SqliteConnection.uuidFromBytes(row.getBytes("party_id")),
+                              SqliteConnection.uuidFromBytes(row.getBytes("inviter")),
+                              playerId,
+                              Instant.ofEpochMilli(row.getLong("expires_at"))))
+                  .list());
+    } catch (RuntimeException e) {
       throw new IllegalStateException("Failed to read invites for " + playerId, e);
     }
   }
 
   @Override
   public Optional<PartyInvite> findInvite(UUID partyId, UUID invitee, Instant now) {
-    byte[] party = SqliteConnection.uuidToBytes(partyId);
-    byte[] inviteeBytes = SqliteConnection.uuidToBytes(invitee);
-    try (PreparedStatement stmt =
-        sqlite.connection().prepareStatement(SqlStatements.load("party/select-invite.sql"))) {
-      stmt.setBytes(1, party);
-      stmt.setBytes(2, inviteeBytes);
-      stmt.setLong(3, now.toEpochMilli());
-      try (ResultSet rs = stmt.executeQuery()) {
-        if (!rs.next()) {
-          return Optional.empty();
-        }
-        return Optional.of(
-            new PartyInvite(
-                partyId,
-                SqliteConnection.uuidFromBytes(rs.getBytes("inviter")),
-                invitee,
-                Instant.ofEpochMilli(rs.getLong("expires_at"))));
-      }
-    } catch (SQLException e) {
+    Objects.requireNonNull(partyId, "partyId");
+    Objects.requireNonNull(invitee, "invitee");
+    Objects.requireNonNull(now, "now");
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("party/select-invite.sql"))
+                  .bind(0, SqliteConnection.uuidToBytes(partyId))
+                  .bind(1, SqliteConnection.uuidToBytes(invitee))
+                  .bind(2, now.toEpochMilli())
+                  .map(
+                      (row, context) ->
+                          new PartyInvite(
+                              partyId,
+                              SqliteConnection.uuidFromBytes(row.getBytes("inviter")),
+                              invitee,
+                              Instant.ofEpochMilli(row.getLong("expires_at"))))
+                  .findOne());
+    } catch (RuntimeException e) {
       throw new IllegalStateException("Failed to read invite for " + invitee + " to " + partyId, e);
     }
   }
 
-  private List<UUID> membersOf(UUID partyId) throws SQLException {
-    byte[] party = SqliteConnection.uuidToBytes(partyId);
-    List<UUID> members = new ArrayList<>();
-    try (PreparedStatement stmt =
-        sqlite.connection().prepareStatement(SqlStatements.load("party/select-members.sql"))) {
-      stmt.setBytes(1, party);
-      try (ResultSet rs = stmt.executeQuery()) {
-        while (rs.next()) {
-          members.add(SqliteConnection.uuidFromBytes(rs.getBytes("member")));
-        }
-      }
-    }
-    return members;
+  private List<UUID> membersOf(Handle handle, UUID partyId) {
+    return handle
+        .createQuery(SqlStatements.load("party/select-members.sql"))
+        .bind(0, SqliteConnection.uuidToBytes(partyId))
+        .map((row, context) -> SqliteConnection.uuidFromBytes(row.getBytes("member")))
+        .list();
   }
 
   @Override
   public List<PartyInvite> findPendingInvitesUnbounded(UUID partyId) {
-    byte[] party = SqliteConnection.uuidToBytes(partyId);
-    List<PartyInvite> result = new ArrayList<>();
-    try (PreparedStatement stmt =
-        sqlite
-            .connection()
-            .prepareStatement(SqlStatements.load("party/select-invites-by-party.sql"))) {
-      stmt.setBytes(1, party);
-      try (ResultSet rs = stmt.executeQuery()) {
-        while (rs.next()) {
-          result.add(
-              new PartyInvite(
-                  partyId,
-                  SqliteConnection.uuidFromBytes(rs.getBytes("inviter")),
-                  SqliteConnection.uuidFromBytes(rs.getBytes("invitee")),
-                  Instant.ofEpochMilli(rs.getLong("expires_at"))));
-        }
-      }
-      return result;
-    } catch (SQLException e) {
+    Objects.requireNonNull(partyId, "partyId");
+    try {
+      return sqlite.withHandle(
+          handle ->
+              handle
+                  .createQuery(SqlStatements.load("party/select-invites-by-party.sql"))
+                  .bind(0, SqliteConnection.uuidToBytes(partyId))
+                  .map(
+                      (row, context) ->
+                          new PartyInvite(
+                              partyId,
+                              SqliteConnection.uuidFromBytes(row.getBytes("inviter")),
+                              SqliteConnection.uuidFromBytes(row.getBytes("invitee")),
+                              Instant.ofEpochMilli(row.getLong("expires_at"))))
+                  .list());
+    } catch (RuntimeException e) {
       throw new IllegalStateException("Failed to read invites of party " + partyId, e);
     }
   }
 
   @Override
   public void reassignInviteInviter(UUID partyId, UUID oldLeader, UUID newLeader) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(
-                  SqlStatements.load("party/reassign-invite-inviter.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(newLeader));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(partyId));
-            stmt.setBytes(3, SqliteConnection.uuidToBytes(oldLeader));
-            stmt.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("party/reassign-invite-inviter.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(newLeader))
+                .bind(1, SqliteConnection.uuidToBytes(partyId))
+                .bind(2, SqliteConnection.uuidToBytes(oldLeader))
+                .execute());
   }
 
   @Override
   public void createParty(UUID partyId, String name, UUID leaderId, Instant createdAt) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/insert.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-            stmt.setString(2, name);
-            stmt.setBytes(3, SqliteConnection.uuidToBytes(leaderId));
-            stmt.setLong(4, createdAt.toEpochMilli());
-            stmt.executeUpdate();
-          }
-          insertMember(connection, partyId, leaderId, createdAt);
-          return null;
+    transaction(
+        handle -> {
+          handle
+              .createUpdate(SqlStatements.load("party/insert.sql"))
+              .bind(0, SqliteConnection.uuidToBytes(partyId))
+              .bind(1, name)
+              .bind(2, SqliteConnection.uuidToBytes(leaderId))
+              .bind(3, createdAt.toEpochMilli())
+              .execute();
+          insertMember(handle, partyId, leaderId, createdAt);
         });
   }
 
   @Override
   public void deleteParty(UUID partyId) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/delete.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-            stmt.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("party/delete.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(partyId))
+                .execute());
   }
 
   @Override
   public void addMember(UUID partyId, UUID memberId, Instant joinedAt) {
-    inTransaction(
-        connection -> {
-          insertMember(connection, partyId, memberId, joinedAt);
-          return null;
-        });
+    transaction(handle -> insertMember(handle, partyId, memberId, joinedAt));
   }
 
-  private static void insertMember(
-      Connection connection, UUID partyId, UUID memberId, Instant joinedAt) throws SQLException {
-    try (PreparedStatement stmt =
-        connection.prepareStatement(SqlStatements.load("party/insert-member.sql"))) {
-      stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-      stmt.setBytes(2, SqliteConnection.uuidToBytes(memberId));
-      stmt.setLong(3, joinedAt.toEpochMilli());
-      stmt.executeUpdate();
-    }
+  private static void insertMember(Handle handle, UUID partyId, UUID memberId, Instant joinedAt) {
+    handle
+        .createUpdate(SqlStatements.load("party/insert-member.sql"))
+        .bind(0, SqliteConnection.uuidToBytes(partyId))
+        .bind(1, SqliteConnection.uuidToBytes(memberId))
+        .bind(2, joinedAt.toEpochMilli())
+        .execute();
   }
 
   @Override
   public void removeMember(UUID partyId, UUID memberId) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/delete-member.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(memberId));
-            stmt.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("party/delete-member.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(partyId))
+                .bind(1, SqliteConnection.uuidToBytes(memberId))
+                .execute());
   }
 
   @Override
   public void setLeader(UUID partyId, UUID leaderId) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/set-leader.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(leaderId));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(partyId));
-            stmt.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("party/set-leader.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(leaderId))
+                .bind(1, SqliteConnection.uuidToBytes(partyId))
+                .execute());
   }
 
   @Override
   public void upsertInvite(UUID partyId, UUID invitee, UUID inviter, Instant expiresAt) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/upsert-invite.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(invitee));
-            stmt.setBytes(3, SqliteConnection.uuidToBytes(inviter));
-            stmt.setLong(4, expiresAt.toEpochMilli());
-            stmt.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("party/upsert-invite.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(partyId))
+                .bind(1, SqliteConnection.uuidToBytes(invitee))
+                .bind(2, SqliteConnection.uuidToBytes(inviter))
+                .bind(3, expiresAt.toEpochMilli())
+                .execute());
   }
 
   @Override
   public void deleteInvite(UUID partyId, UUID invitee) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/delete-invite.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(invitee));
-            stmt.executeUpdate();
-          }
-          return null;
-        });
+    transaction(
+        handle ->
+            handle
+                .createUpdate(SqlStatements.load("party/delete-invite.sql"))
+                .bind(0, SqliteConnection.uuidToBytes(partyId))
+                .bind(1, SqliteConnection.uuidToBytes(invitee))
+                .execute());
   }
 
   @Override
   public void acceptInvite(UUID partyId, UUID invitee, Instant joinedAt) {
-    inTransaction(
-        connection -> {
-          insertMember(connection, partyId, invitee, joinedAt);
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/delete-invite.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(invitee));
-            stmt.executeUpdate();
-          }
-          return null;
+    transaction(
+        handle -> {
+          insertMember(handle, partyId, invitee, joinedAt);
+          handle
+              .createUpdate(SqlStatements.load("party/delete-invite.sql"))
+              .bind(0, SqliteConnection.uuidToBytes(partyId))
+              .bind(1, SqliteConnection.uuidToBytes(invitee))
+              .execute();
         });
   }
 
   @Override
   public void leaderLeaves(UUID partyId, UUID oldLeader, UUID newLeader) {
-    inTransaction(
-        connection -> {
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/set-leader.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(newLeader));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(partyId));
-            stmt.executeUpdate();
-          }
-          try (PreparedStatement stmt =
-              connection.prepareStatement(SqlStatements.load("party/delete-member.sql"))) {
-            stmt.setBytes(1, SqliteConnection.uuidToBytes(partyId));
-            stmt.setBytes(2, SqliteConnection.uuidToBytes(oldLeader));
-            stmt.executeUpdate();
-          }
-          return null;
+    transaction(
+        handle -> {
+          handle
+              .createUpdate(SqlStatements.load("party/set-leader.sql"))
+              .bind(0, SqliteConnection.uuidToBytes(newLeader))
+              .bind(1, SqliteConnection.uuidToBytes(partyId))
+              .execute();
+          handle
+              .createUpdate(SqlStatements.load("party/delete-member.sql"))
+              .bind(0, SqliteConnection.uuidToBytes(partyId))
+              .bind(1, SqliteConnection.uuidToBytes(oldLeader))
+              .execute();
         });
   }
 
-  private void inTransaction(TransactionAction action) {
-    Connection connection = sqlite.connection();
+  private void transaction(Consumer<Handle> action) {
     try {
-      connection.setAutoCommit(false);
-      action.run(connection);
-      connection.commit();
-    } catch (SQLException e) {
-      try {
-        connection.rollback();
-      } catch (SQLException rollbackFailure) {
-        e.addSuppressed(rollbackFailure);
-      }
+      sqlite.useTransaction(action);
+    } catch (RuntimeException e) {
       throw new IllegalStateException("Party store transaction failed", e);
-    } finally {
-      try {
-        connection.setAutoCommit(true);
-      } catch (SQLException ignored) {
-        // The connection is closing or already broken; nothing to restore.
-      }
     }
-  }
-
-  @FunctionalInterface
-  private interface TransactionAction {
-    Void run(Connection connection) throws SQLException;
   }
 
   @Override
   public void close() {
     sqlite.close();
   }
+
+  private record PartyRow(String name, UUID leader, Instant createdAt) {}
 }

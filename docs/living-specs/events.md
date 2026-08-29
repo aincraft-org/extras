@@ -48,14 +48,12 @@ exposes a repository row, Bukkit object, or item content.
 
 ## Implementation guidance
 
-- `api/events/` owns the sealed `ExtrasEvent` contract and all concrete
-  records; `core/InProcessExtrasEventService` is the single bus
-  implementation (CopyOnWriteArrayList, no executor or background thread).
-- Domain services receive the bus through their constructor; default
-  constructors use `InProcessExtrasEventService.noOp()` so existing tests and
-  callers keep working without a bus.
-- Services take a `java.time.Clock` for event timestamps where they did not
-  already have one.
+- `api/events/` owns the sealed `ExtrasEvent` contract and all concrete records; `core/InProcessExtrasEventService`
+  is the single API adapter over a Utilities `EventBus` (CopyOnWrite-backed internally by the utility
+  implementation, no executor or background thread).
+- Domain services receive the API event service through their constructor; default constructors use
+  `InProcessExtrasEventService.noOp()` so existing tests and callers keep working without a bus.
+- Services take a `java.time.Clock` for event timestamps where they did not already have one.
 - `SqliteMailRepository` reports changed rows/mail ids (`markRead`/
   `markUnread` return boolean; `deletedIdsAllRead` returns deleted ids inside
   the same transaction) so the service emits only real state changes.
